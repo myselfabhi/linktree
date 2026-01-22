@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import mongoose from "mongoose";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import linkRoutes from "./routes/link.js";
 import uploadRoutes from "./routes/upload.js";
 import githubRoutes from "./routes/github.js";
+import { logger } from "./utils/logger.js";
 
 dotenv.config();
 
@@ -18,9 +20,29 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-	res.json({ status: "ok", timestamp: new Date().toISOString() });
+// Health check: verify MongoDB connection
+app.get("/health", async (_req, res) => {
+	const ts = new Date().toISOString();
+	try {
+		const dbOk = mongoose.connection.readyState === 1;
+		if (!dbOk) {
+			res.status(503).json({
+				status: "degraded",
+				db: "disconnected",
+				readyState: mongoose.connection.readyState,
+				timestamp: ts,
+			});
+			return;
+		}
+		res.json({ status: "ok", db: "ok", timestamp: ts });
+	} catch (e) {
+		logger.error({ err: e, health: "check" }, "Health check failed");
+		res.status(503).json({
+			status: "error",
+			db: "error",
+			timestamp: ts,
+		});
+	}
 });
 
 // API routes
@@ -34,9 +56,9 @@ app.use("/api/auth", authRoutes);
 // GitHub routes
 if (githubRoutes) {
 	app.use("/api/github", githubRoutes);
-	console.log("✅ GitHub routes registered at /api/github");
+	logger.info("GitHub routes registered at /api/github");
 } else {
-	console.error("❌ GitHub routes module is undefined");
+	logger.error("GitHub routes module is undefined");
 }
 
 // Profile routes
@@ -52,11 +74,11 @@ app.use("/api/upload", uploadRoutes);
 connectDB()
 	.then(() => {
 		app.listen(PORT, () => {
-			console.log(`🚀 Backend server running on http://localhost:${PORT}`);
+			logger.info({ port: PORT }, "Backend server running");
 		});
 	})
-	.catch((error) => {
-		console.error("❌ Failed to connect to MongoDB:", error);
+	.catch((err) => {
+		logger.fatal({ err }, "Failed to connect to MongoDB");
 		process.exit(1);
 	});
 

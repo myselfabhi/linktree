@@ -1,11 +1,11 @@
 import { Request, Response } from "express";
-import mongoose from "mongoose";
 import Link from "../models/Link.js";
 import Profile from "../models/Profile.js";
 import { validateUrl } from "../services/urlValidationService.js";
 import { captureScreenshot } from "../services/screenshotService.js";
 import { fetchGitHubMetrics } from "../services/githubMetricsService.js";
 import { runLighthouseAudit } from "../services/lighthouseService.js";
+import { logger } from "../utils/logger.js";
 
 interface CreateLinkBody {
 	title: string;
@@ -116,13 +116,23 @@ export const createLink = async (
 
 		if (url && url.trim()) {
 			const urlToProcess = url.trim();
-			
+			const linkId = link._id.toString();
+
 			captureScreenshot(urlToProcess)
 				.then((screenshotUrl) => {
-					Link.findByIdAndUpdate(link._id, { screenshotUrl })
-						.catch((err) => console.error("Failed to update screenshot URL:", err));
+					Link.findByIdAndUpdate(link._id, { screenshotUrl }).catch((err) => {
+						logger.error(
+							{ err, linkId, url: urlToProcess, task: "screenshot_update" },
+							"Failed to update screenshot URL",
+						);
+					});
 				})
-				.catch((err) => console.error("Failed to capture screenshot:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, url: urlToProcess, task: "screenshot_capture" },
+						"Failed to capture screenshot",
+					);
+				});
 
 			runLighthouseAudit(urlToProcess)
 				.then((scores) => {
@@ -133,24 +143,47 @@ export const createLink = async (
 							lighthouseBestPractices: scores.bestPractices,
 							lighthouseSEO: scores.seo,
 							lighthouseLastRun: new Date(),
-						}).catch((err) => console.error("Failed to update Lighthouse scores:", err));
+						}).catch((err) => {
+							logger.error(
+								{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
+								"Failed to update Lighthouse scores",
+							);
+						});
 					}
 				})
-				.catch((err) => console.error("Failed to run Lighthouse audit:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, url: urlToProcess, task: "lighthouse_audit" },
+						"Failed to run Lighthouse audit",
+					);
+				});
 		}
 
 		if (githubUrl && githubUrl.trim()) {
-			fetchGitHubMetrics(githubUrl.trim())
+			const ghUrl = githubUrl.trim();
+			const linkId = link._id.toString();
+
+			fetchGitHubMetrics(ghUrl)
 				.then((metrics) => {
 					if (metrics) {
 						Link.findByIdAndUpdate(link._id, {
 							githubStars: metrics.stars,
 							lastCommitDate: metrics.lastCommitDate,
 							lastCommitMessage: metrics.lastCommitMessage,
-						}).catch((err) => console.error("Failed to update GitHub metrics:", err));
+						}).catch((err) => {
+							logger.error(
+								{ err, linkId, githubUrl: ghUrl, task: "github_update" },
+								"Failed to update GitHub metrics",
+							);
+						});
 					}
 				})
-				.catch((err) => console.error("Failed to fetch GitHub metrics:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, githubUrl: ghUrl, task: "github_metrics" },
+						"Failed to fetch GitHub metrics",
+					);
+				});
 		}
 
 		res.status(201).json({
@@ -159,7 +192,7 @@ export const createLink = async (
 			data: { link },
 		});
 	} catch (error) {
-		console.error("Create link error:", error);
+		logger.error({ err: error, handler: "createLink" }, "Create link error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
@@ -197,7 +230,7 @@ export const getLinks = async (req: Request, res: Response) => {
 			data: { links },
 		});
 	} catch (error) {
-		console.error("Get links error:", error);
+		logger.error({ err: error, handler: "getLinks" }, "Get links error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
@@ -297,13 +330,23 @@ export const updateLink = async (
 
 		if (urlChanged && url && url.trim()) {
 			const urlToProcess = url.trim();
-			
+			const linkId = link._id.toString();
+
 			captureScreenshot(urlToProcess)
 				.then((screenshotUrl) => {
-					Link.findByIdAndUpdate(link._id, { screenshotUrl })
-						.catch((err) => console.error("Failed to update screenshot URL:", err));
+					Link.findByIdAndUpdate(link._id, { screenshotUrl }).catch((err) => {
+						logger.error(
+							{ err, linkId, url: urlToProcess, task: "screenshot_update" },
+							"Failed to update screenshot URL",
+						);
+					});
 				})
-				.catch((err) => console.error("Failed to capture screenshot:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, url: urlToProcess, task: "screenshot_capture" },
+						"Failed to capture screenshot",
+					);
+				});
 
 			runLighthouseAudit(urlToProcess)
 				.then((scores) => {
@@ -314,26 +357,49 @@ export const updateLink = async (
 							lighthouseBestPractices: scores.bestPractices,
 							lighthouseSEO: scores.seo,
 							lighthouseLastRun: new Date(),
-						}).catch((err) => console.error("Failed to update Lighthouse scores:", err));
+						}).catch((err) => {
+							logger.error(
+								{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
+								"Failed to update Lighthouse scores",
+							);
+						});
 					}
 				})
-				.catch((err) => console.error("Failed to run Lighthouse audit:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, url: urlToProcess, task: "lighthouse_audit" },
+						"Failed to run Lighthouse audit",
+					);
+				});
 		}
 
 		const githubUrlChanged = githubUrl !== undefined && githubUrl?.trim() !== link.githubUrl;
-		
+
 		if (githubUrlChanged && githubUrl && githubUrl.trim()) {
-			fetchGitHubMetrics(githubUrl.trim())
+			const ghUrl = githubUrl.trim();
+			const linkId = link._id.toString();
+
+			fetchGitHubMetrics(ghUrl)
 				.then((metrics) => {
 					if (metrics) {
 						Link.findByIdAndUpdate(link._id, {
 							githubStars: metrics.stars,
 							lastCommitDate: metrics.lastCommitDate,
 							lastCommitMessage: metrics.lastCommitMessage,
-						}).catch((err) => console.error("Failed to update GitHub metrics:", err));
+						}).catch((err) => {
+							logger.error(
+								{ err, linkId, githubUrl: ghUrl, task: "github_update" },
+								"Failed to update GitHub metrics",
+							);
+						});
 					}
 				})
-				.catch((err) => console.error("Failed to fetch GitHub metrics:", err));
+				.catch((err) => {
+					logger.error(
+						{ err, linkId, githubUrl: ghUrl, task: "github_metrics" },
+						"Failed to fetch GitHub metrics",
+					);
+				});
 		}
 
 		res.status(200).json({
@@ -342,7 +408,7 @@ export const updateLink = async (
 			data: { link },
 		});
 	} catch (error) {
-		console.error("Update link error:", error);
+		logger.error({ err: error, handler: "updateLink" }, "Update link error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
@@ -401,7 +467,7 @@ export const deleteLink = async (req: Request<{ id: string }>, res: Response) =>
 			message: "Link deleted successfully",
 		});
 	} catch (error) {
-		console.error("Delete link error:", error);
+		logger.error({ err: error, handler: "deleteLink" }, "Delete link error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
@@ -467,11 +533,12 @@ export const validateLink = async (
 				statusCode: validationResult.statusCode,
 			},
 		});
-	} catch (error: any) {
-		console.error("Validate link error:", error);
+	} catch (error: unknown) {
+		const msg = error instanceof Error ? error.message : "Failed to validate link";
+		logger.error({ err: error, handler: "validateLink" }, "Validate link error");
 		res.status(500).json({
 			success: false,
-			message: error.message || "Failed to validate link",
+			message: msg,
 		});
 	}
 };
@@ -509,7 +576,7 @@ export const getPublicLinks = async (req: Request, res: Response) => {
 			data: { links },
 		});
 	} catch (error) {
-		console.error("Get public links error:", error);
+		logger.error({ err: error, handler: "getPublicLinks" }, "Get public links error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
@@ -542,7 +609,7 @@ export const trackLinkClick = async (req: Request<{ id: string }>, res: Response
 			},
 		});
 	} catch (error) {
-		console.error("Track link click error:", error);
+		logger.error({ err: error, handler: "trackLinkClick" }, "Track link click error");
 		res.status(500).json({
 			success: false,
 			message: "Internal server error",
