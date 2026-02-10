@@ -5,264 +5,268 @@ A developer portfolio platform that showcases your live projects with automated 
 **Live Demo:** [https://devtree.vercel.app](https://devtree.vercel.app)  
 **Example Profile:** [/example](https://devtree.vercel.app/example)
 
-## 🚀 Features
+## Features
 
-- **Project Showcase**: Display your live projects with visual previews and detailed metrics
-- **Lighthouse Integration**: Automatic performance, accessibility, best practices, and SEO scoring
-- **GitHub Metrics**: Stars, last commit date, and commit messages
-- **Tech Stack Detection**: Automatic detection from multiple languages (JavaScript/TypeScript, Python, Go, Rust, Java, PHP)
-- **Screenshot Capture**: Automated visual previews using Puppeteer
-- **Responsive Design**: Fully responsive across all devices
-- **Authentication**: Secure user authentication with NextAuth.js
-- **Custom Profiles**: Personalized profiles with bio, avatar, and theme customization
+### Profile & links
+- **Custom profiles**: Username (unique URL), display name, bio, avatar, and background image
+- **Theme customization**: Colors (background, text, button, button hover), Google Fonts, and background image
+- **Link management**: Add, edit, and delete links (projects) with title, URL, description, tech stack, role (Frontend/Backend/Full Stack), and optional GitHub URL
+- **Link ordering**: Links displayed in configurable order
+- **Username availability**: Check availability before creating or updating profile
+- **Public profile page**: Responsive profile at `/{username}` with theme applied and project cards
+- **Project detail page**: Dedicated page per project at `/{username}/projects/{projectId}` with full metrics
 
-## 🛠️ Tech Stack
+### Projects & metrics
+- **Project showcase**: Display live projects with screenshot previews and status (live/down/slow/unknown)
+- **Lighthouse integration**: Performance, accessibility, best practices, and SEO scores (run via “Validate” on a link)
+- **GitHub metrics**: Stars, last commit date, and last commit message (optional GitHub URL on link)
+- **Tech stack detection**: From repository (e.g. package.json, requirements.txt, go.mod)
+- **Screenshot capture**: Visual previews stored in Cloudflare R2
+- **Link validation**: Validate project URL (screenshot + optional Lighthouse + GitHub fetch)
+
+### Analytics & tracking
+- **Profile view tracking**: Increment view count when public profile is loaded
+- **Link click tracking**: Increment click count when a link is opened
+- **Analytics dashboard**: Total profile views, total link clicks, and per-link click counts
+
+### Auth & media
+- **Authentication**: Sign up, login, and session via NextAuth.js (JWT from backend)
+- **Image upload**: Avatar and background image upload to R2
+- **Image delete**: Remove avatar or background image and clear from profile
+
+## Tech stack
 
 ### Frontend
 - **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v4
+- **UI**: Radix UI (Label, Slot) + custom components (Button, Card, Input, Modal, ColorPicker, AvatarUpload, BackgroundUpload, ProjectCard)
+- **Forms**: React Hook Form + Zod
+- **Icons**: Lucide React
 - **Animations**: Framer Motion
-- **Authentication**: NextAuth.js
-- **UI Components**: Radix UI + custom components
+- **Drag and drop**: @dnd-kit (core, sortable, utilities)
+- **Auth**: NextAuth.js
 
 ### Backend
+- **Runtime**: Node.js
 - **Framework**: Express.js
-- **Language**: TypeScript
+- **Language**: TypeScript (ESM)
 - **Database**: MongoDB with Mongoose
-- **Storage**: Cloudflare R2 (S3-compatible)
-- **Browser Automation**: Puppeteer
-- **Performance Auditing**: Lighthouse
-- **GitHub Integration**: GitHub API v3
+- **Auth**: JWT (jsonwebtoken), bcrypt for passwords
+- **Storage**: Cloudflare R2 (S3-compatible, via @aws-sdk/client-s3)
+- **Screenshot**: Puppeteer
+- **Lighthouse**: lighthouse
+- **GitHub**: GitHub API (fetch repo metrics)
+- **Logging**: Pino
 
 ### Infrastructure
-- **Frontend Hosting**: Vercel
-- **Backend Hosting**: Render
+- **Frontend**: Vercel
+- **Backend**: Render
 - **Database**: MongoDB Atlas
-- **Object Storage**: Cloudflare R2
+- **Object storage**: Cloudflare R2
 
-## 📁 Project Structure
+## Project structure
 
 ```
 linktree/
-├── frontend/          # Next.js frontend application
-│   ├── app/          # App Router pages and routes
-│   ├── components/   # React components
-│   └── lib/          # Utility functions
-├── backend/          # Express backend API server
-│   ├── src/
-│   │   ├── controllers/  # Route controllers
-│   │   ├── services/     # Business logic (screenshot, lighthouse, GitHub)
-│   │   ├── models/       # Mongoose schemas
-│   │   ├── routes/       # API routes
-│   │   └── middleware/   # Auth middleware
-│   └── dist/         # Compiled JavaScript
-├── TECHNICAL_PRD.md  # Detailed technical documentation
-├── PRD.md           # Product requirements document
-└── README.md        # This file
+├── frontend/                 # Next.js app
+│   ├── app/
+│   │   ├── [username]/       # Public profile & project detail
+│   │   ├── api/auth/        # NextAuth route
+│   │   ├── dashboard/       # Dashboard, profile, links, analytics
+│   │   ├── login/ signup/
+│   │   └── ...
+│   ├── components/ui/        # Reusable UI components
+│   └── lib/api.ts            # Backend API client
+├── backend/
+│   └── src/
+│       ├── config/          # DB connection
+│       ├── controllers/     # Auth, profile, link, upload, GitHub
+│       ├── middleware/      # JWT auth
+│       ├── models/          # User, Profile, Link (Mongoose)
+│       ├── routes/          # API routes
+│       ├── services/        # Screenshot, R2, Lighthouse, GitHub
+│       └── utils/           # Logger, types
+├── PRD.md
+├── DEVELOPMENT_SCHEDULE.md
+└── README.md
 ```
 
-## 🚦 Getting Started
+## Getting started
 
 ### Prerequisites
 
-- Node.js 20+ 
-- MongoDB database (local or Atlas)
-- Cloudflare R2 bucket (or AWS S3)
-- GitHub Personal Access Token (optional, for higher rate limits)
+- Node.js 20+
+- MongoDB (local or Atlas)
+- Cloudflare R2 bucket (or any S3-compatible storage)
+- (Optional) GitHub Personal Access Token for higher rate limits
 
-### Frontend Setup
+### Frontend
 
 ```bash
 cd frontend
 npm install
 
-# Create .env.local file
-cat > .env.local << EOF
+# .env.local
 NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
-NEXTAUTH_SECRET=your-secret-key-here
+NEXTAUTH_SECRET=your-secret-key
 NEXTAUTH_URL=http://localhost:3000
-EOF
+```
 
+```bash
 npm run dev
 ```
 
-Frontend runs on `http://localhost:3000`
+Runs at `http://localhost:3000`.
 
-### Backend Setup
+### Backend
 
 ```bash
 cd backend
 npm install
 
-# Create .env file
-cat > .env << EOF
+# .env
 PORT=3001
 MONGODB_URI=mongodb://localhost:27017/devtree
-JWT_SECRET=your-jwt-secret-here
+JWT_SECRET=your-jwt-secret
 
-# Cloudflare R2 Configuration
+# R2 (S3-compatible)
 R2_ACCOUNT_ID=your-r2-account-id
 R2_ACCESS_KEY_ID=your-r2-access-key
 R2_SECRET_ACCESS_KEY=your-r2-secret-key
 R2_BUCKET_NAME=devtree-images
 R2_PUBLIC_URL=https://pub-xxxxx.r2.dev
 
-# GitHub API (optional, for higher rate limits)
+# Optional
 GITHUB_API_TOKEN=your-github-token
-EOF
+```
 
+```bash
 npm run dev
 ```
 
-Backend runs on `http://localhost:3001`
+Runs at `http://localhost:3001`.
 
-### Build for Production
+### Production build
 
-**Frontend:**
+**Frontend**
 ```bash
-cd frontend
-npm run build
-npm start
+cd frontend && npm run build && npm start
 ```
 
-**Backend:**
+**Backend**
 ```bash
-cd backend
-npm run build
-npm start
+cd backend && npm run build && npm start
 ```
 
-## 🔧 Environment Variables
+## Environment variables
 
 ### Frontend (`.env.local`)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `NEXT_PUBLIC_BACKEND_URL` | Backend API URL | Yes |
-| `NEXTAUTH_SECRET` | NextAuth.js secret key | Yes |
-| `NEXTAUTH_URL` | Frontend URL for auth callbacks | Yes |
+| `NEXT_PUBLIC_BACKEND_URL` | Backend API base URL | Yes |
+| `NEXTAUTH_SECRET` | NextAuth secret | Yes |
+| `NEXTAUTH_URL` | App URL for auth callbacks | Yes |
 
 ### Backend (`.env`)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `PORT` | Server port | No (default: 3001) |
+| `PORT` | Server port | No (default 3001) |
 | `MONGODB_URI` | MongoDB connection string | Yes |
 | `JWT_SECRET` | JWT signing secret | Yes |
 | `R2_ACCOUNT_ID` | Cloudflare R2 account ID | Yes |
-| `R2_ACCESS_KEY_ID` | Cloudflare R2 access key | Yes |
-| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret key | Yes |
-| `R2_BUCKET_NAME` | R2 bucket name | No (default: linktree-image) |
-| `R2_PUBLIC_URL` | R2 public URL for images | No (auto-generated) |
-| `GITHUB_API_TOKEN` | GitHub personal access token | No (recommended) |
+| `R2_ACCESS_KEY_ID` | R2 access key | Yes |
+| `R2_SECRET_ACCESS_KEY` | R2 secret key | Yes |
+| `R2_BUCKET_NAME` | R2 bucket name | No |
+| `R2_PUBLIC_URL` | Public URL for R2 objects | No |
+| `GITHUB_API_TOKEN` | GitHub token (higher limits) | No |
 
-## 📡 API Endpoints
+## API reference
 
-### Authentication
-- `POST /api/auth/signup` - User registration
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user
+### Health
+- `GET /health` – Service and MongoDB status
+
+### Auth
+- `POST /api/auth/signup` – Register
+- `POST /api/auth/login` – Login
+- `GET /api/auth/me` – Current user (requires auth)
 
 ### Profile
-- `GET /api/profile` - Get current user's profile
-- `POST /api/profile` - Create profile
-- `PUT /api/profile` - Update profile
-- `GET /api/profile/:username` - Get public profile by username
+- `GET /api/profile/check/username?username=...` – Check username availability
+- `POST /api/profile` – Create profile (auth)
+- `GET /api/profile` – Get own profile (auth)
+- `PUT /api/profile` – Update profile (auth)
+- `GET /api/profile/track/:username` – Track profile view (public)
+- `GET /api/profile/:username` – Get public profile by username
 
 ### Links
-- `GET /api/links` - Get all links for user
-- `POST /api/links` - Create new link
-- `PUT /api/links/:id` - Update link
-- `DELETE /api/links/:id` - Delete link
-- `PUT /api/links/reorder` - Reorder links
+- `GET /api/links/public/:username` – Public links for username
+- `GET /api/links/track/:id` – Track link click (public)
+- `POST /api/links` – Create link (auth)
+- `GET /api/links` – List own links (auth)
+- `PUT /api/links/:id` – Update link (auth)
+- `DELETE /api/links/:id` – Delete link (auth)
+- `POST /api/links/:id/validate` – Run screenshot + optional Lighthouse + GitHub (auth)
 
 ### GitHub
-- `POST /api/github/fetch` - Fetch GitHub repository details
+- `POST /api/github/fetch` – Fetch repo metrics (auth, body: `{ githubUrl }`)
 
 ### Upload
-- `POST /api/upload` - Upload image (avatar/background)
+- `POST /api/upload?type=avatar|background` – Upload image (auth, multipart)
+- `DELETE /api/upload` – Delete image by URL (auth, body: `{ url }`)
 
-## 🔍 How It Works
+## How it works
 
-### Screenshot Capture
-1. User adds a project URL
-2. Backend launches Puppeteer (headless Chrome)
-3. Navigates to the URL and waits for page load
-4. Captures screenshot at 1920x1080 resolution
-5. Uploads to Cloudflare R2
-6. Stores public URL in database
+### Screenshot
+1. User adds/edits a link with a URL and triggers “Validate”.
+2. Backend uses Puppeteer to open the URL and capture a screenshot.
+3. Image is uploaded to R2; public URL is saved on the link.
 
-### Lighthouse Auditing
-1. Puppeteer launches browser instance
-2. Lighthouse connects to browser via Chrome DevTools Protocol
-3. Runs audits: Performance, Accessibility, Best Practices, SEO
-4. Scores calculated (0-100) and stored in database
-5. Runs asynchronously (fire-and-forget)
+### Lighthouse
+1. Triggered from “Validate” on a link (optional, or part of validation flow).
+2. Puppeteer + Lighthouse produce Performance, Accessibility, Best Practices, SEO scores.
+3. Scores and timestamp are stored on the link.
 
-### GitHub Metrics
-1. Extracts owner/repo from GitHub URL
-2. Fetches repository info (stars, commits)
-3. Detects tech stack from dependency files:
-   - `package.json` (JavaScript/TypeScript)
-   - `requirements.txt` (Python)
-   - `go.mod` (Go)
-   - `Cargo.toml` (Rust)
-   - `pom.xml` (Java/Maven)
-   - Repository topics
-4. Supports monorepo detection (scans subdirectories)
-5. Infers project role (Frontend/Backend/Full Stack)
+### GitHub metrics
+1. User optionally adds a GitHub repo URL to a link.
+2. “Validate” or GitHub fetch calls the backend with that URL.
+3. Backend fetches repo info (stars, recent commit) and tech stack from dependency files/topics.
+4. Results are stored on the link.
 
-### Tech Stack Detection
-- **Dynamic Discovery**: Scans root and subdirectories for dependency files
-- **Multi-language**: Supports 6+ languages/frameworks
-- **Monorepo Support**: Merges dependencies from multiple package files
-- **Smart Inference**: Maps dependencies to frameworks and roles
+### Tech stack detection
+- Scans repo for `package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, `pom.xml`, etc.
+- Supports monorepos (multiple package files).
+- Infers role (Frontend/Backend/Full Stack) from dependencies and structure.
 
-## 📚 Documentation
+## Documentation
 
-- **[TECHNICAL_PRD.md](./TECHNICAL_PRD.md)**: Comprehensive technical documentation with data flows, API details, and implementation specifics
-- **[PRD.md](./PRD.md)**: Product requirements and feature specifications
+- **[PRD.md](./PRD.md)** – Product requirements and feature scope
+- **[DEVELOPMENT_SCHEDULE.md](./DEVELOPMENT_SCHEDULE.md)** – Learning-focused development plan
 
-## 🧪 Development
+## Development
 
-Both frontend and backend use:
-- **Biome** for linting and formatting
-- **TypeScript** for type safety
-- **ES Modules** (backend)
+- **Lint/format**: Biome (`npm run lint`, `npm run format` in frontend or backend)
+- **TypeScript**: Strict typing in both apps
 
-```bash
-# Lint
-npm run lint
+## Known limitations
 
-# Format
-npm run format
+- **Render free tier**: Backend can cold start (e.g. 30–60s after idle).
+- **GitHub**: Without token, 60 req/h; with token, 5,000 req/h.
+- **Lighthouse**: Can take 10–30s per run; run via “Validate” when needed.
+- **Puppeteer**: Needs enough memory (e.g. 512MB+).
 
-# Build
-npm run build
-```
-
-## 🚨 Known Limitations
-
-- **Render Free Tier**: Backend may have cold start delays (30-60s on first request)
-- **GitHub Rate Limits**: Without API token: 60 requests/hour. With token: 5,000 requests/hour
-- **Lighthouse**: Can take 10-30 seconds per audit (runs asynchronously)
-- **Puppeteer**: Requires sufficient memory (512MB+ recommended)
-
-## 🤝 Contributing
-
-This is a personal project, but suggestions and feedback are welcome!
-
-## 📄 License
+## License
 
 MIT
 
-## 👤 Author
+## Author
 
-**Abhinav Verma**
-- GitHub: [@myselfabhi](https://github.com/myselfabhi)
-- Portfolio: [DevTree Profile](https://devtree.vercel.app/myselfabhi)
+**Abhinav Verma**  
+- GitHub: [@myselfabhi](https://github.com/myselfabhi)  
+- DevTree: [devtree.vercel.app/myselfabhi](https://devtree.vercel.app/myselfabhi)
 
 ---
 
-**Note**: DevTree is deployed on Render's free tier. The backend may take 30-60 seconds to wake up on the first request after inactivity.
+**Note:** The backend on Render’s free tier may take 30–60 seconds to respond after a period of inactivity.
