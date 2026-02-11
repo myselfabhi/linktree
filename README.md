@@ -243,7 +243,7 @@ cd backend && npm run build && npm start
 ## Documentation
 
 - **[PRD.md](./PRD.md)** – Product requirements and feature scope
-- **[DEVELOPMENT_SCHEDULE.md](./DEVELOPMENT_SCHEDULE.md)** – Learning-focused development plan
+- **[DEVELOPMENT_SCHEDULE.md](./DEVELOPMENT_SCHEDULE.md)** – Learning-focused development plan.
 
 ## Development
 
