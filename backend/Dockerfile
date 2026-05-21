@@ -5,9 +5,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+COPY prisma ./prisma
+RUN npx prisma generate
+
 COPY . .
 RUN npm run build
-RUN npx prisma generate
 
 FROM node:20-alpine AS runner
 
@@ -17,8 +19,8 @@ ENV NODE_ENV=production
 
 COPY package*.json ./
 RUN npm ci --omit=dev
-RUN npx prisma generate
 
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
