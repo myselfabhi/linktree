@@ -1,588 +1,326 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Check, X, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
-import { profileApi } from "@/lib/api";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { AvatarUpload } from "@/components/ui/avatar-upload";
-import { BackgroundUpload } from "@/components/ui/background-upload";
-import { ColorPicker } from "@/components/ui/color-picker";
+import { motion } from "framer-motion";
+import { Check, Loader2, Settings, User, Briefcase, Link2, Bot } from "lucide-react";
+import { profileApi, bioTemplateApi } from "@/lib/api";
 
-const profileSchema = z.object({
-	username: z
-		.string()
-		.min(3, "Username must be at least 3 characters")
-		.max(30, "Username must be at most 30 characters")
-		.regex(
-			/^[a-z0-9_-]+$/,
-			"Username can only contain lowercase letters, numbers, hyphens, and underscores"
-		),
-	displayName: z.string().min(2, "Display name must be at least 2 characters"),
-	bio: z.string().optional(),
-	font: z.string().optional(),
-	avatar: z.string().optional(),
-	backgroundImage: z.string().optional(),
-	colors: z.object({
-		background: z.string().optional(),
-		text: z.string().optional(),
-		button: z.string().optional(),
-		buttonHover: z.string().optional(),
-	}).optional(),
-});
-
-// Popular Google Fonts for link pages
-const GOOGLE_FONTS = [
-	{ value: "", label: "Default (System)" },
-	{ value: "Inter", label: "Inter" },
-	{ value: "Roboto", label: "Roboto" },
-	{ value: "Open Sans", label: "Open Sans" },
-	{ value: "Lato", label: "Lato" },
-	{ value: "Montserrat", label: "Montserrat" },
-	{ value: "Poppins", label: "Poppins" },
-	{ value: "Raleway", label: "Raleway" },
-	{ value: "Playfair Display", label: "Playfair Display" },
-	{ value: "Merriweather", label: "Merriweather" },
-	{ value: "Source Sans Pro", label: "Source Sans Pro" },
-	{ value: "Nunito", label: "Nunito" },
+const AVAILABILITY_OPTIONS = [
+	{ value: "available",      label: "Available for work" },
+	{ value: "available_from", label: "Available soon" },
+	{ value: "booked",         label: "Fully booked" },
+	{ value: "not_specified",  label: "Not specified" },
 ];
 
-type ProfileFormData = z.infer<typeof profileSchema>;
+const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "INR"];
 
-export default function ProfilePage() {
-	const { data: session, status } = useSession();
+export default function ProfileSettingsPage() {
+	const { data: session } = useSession();
 	const router = useRouter();
-	const [isLoading, setIsLoading] = useState(true);
-	const [isSaving, setIsSaving] = useState(false);
-	const [error, setError] = useState<string>("");
-	const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
-	const [profile, setProfile] = useState<any>(null);
-	const [originalUsername, setOriginalUsername] = useState<string>("");
-	const [avatarPreview, setAvatarPreview] = useState<string>("");
-	const [backgroundPreview, setBackgroundPreview] = useState<string>("");
-	const [colors, setColors] = useState({
-		background: "#0a0a0f",
-		text: "#f8f9fa",
-		button: "#8b5cf6",
-		buttonHover: "#7c3aed",
-	});
-	const [showColorCustomization, setShowColorCustomization] = useState(false);
+	const [loading, setLoading] = useState(true);
+	const [saving, setSaving] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const [tab, setTab] = useState<"identity" | "hireme" | "socials">("identity");
 
-	const {
-		register,
-		handleSubmit,
-		formState: { errors },
-		watch,
-		setValue,
-	} = useForm<ProfileFormData>({
-		resolver: zodResolver(profileSchema),
-	});
+	// Bio template wizard
+	const [wizardOpen, setWizardOpen] = useState(false);
+	const [wizardAnswers, setWizardAnswers] = useState({ role: "", yearsExp: "", specialty: "" });
+	const [generatingBio, setGeneratingBio] = useState(false);
 
-	const watchedUsername = watch("username");
+	const [form, setForm] = useState({
+		username: "", displayName: "", bio: "", font: "",
+		// Hire-me
+		headline: "", location: "", timezone: "",
+		availabilityStatus: "not_specified",
+		hourlyRateMin: "", hourlyRateMax: "",
+		projectRateMin: "", projectRateMax: "",
+		currency: "USD",
+		calendlyUrl: "", contactEmail: "",
+		servicesOffered: [] as string[],
+		// Socials
+		twitterUrl: "", linkedinUrl: "", githubUrl: "", websiteUrl: "",
+	});
+	const [serviceInput, setServiceInput] = useState("");
+
+	const token = session?.accessToken as string;
 
 	useEffect(() => {
-		if (status === "unauthenticated") {
-			router.push("/login");
-			return;
-		}
+		if (!token) return;
+		profileApi.get(token).then(r => {
+			const p = r.data.profile;
+			if (!p) { router.push("/dashboard"); return; }
+			setForm({
+				username: p.username ?? "",
+				displayName: p.displayName ?? "",
+				bio: p.bio ?? "",
+				font: p.font ?? "",
+				headline: p.headline ?? "",
+				location: p.location ?? "",
+				timezone: p.timezone ?? "",
+				availabilityStatus: p.availabilityStatus ?? "not_specified",
+				hourlyRateMin: p.hourlyRateMin?.toString() ?? "",
+				hourlyRateMax: p.hourlyRateMax?.toString() ?? "",
+				projectRateMin: p.projectRateMin?.toString() ?? "",
+				projectRateMax: p.projectRateMax?.toString() ?? "",
+				currency: p.currency ?? "USD",
+				calendlyUrl: p.calendlyUrl ?? "",
+				contactEmail: p.contactEmail ?? "",
+				servicesOffered: p.servicesOffered ?? [],
+				twitterUrl: p.twitterUrl ?? "",
+				linkedinUrl: p.linkedinUrl ?? "",
+				githubUrl: p.githubUrl ?? "",
+				websiteUrl: p.websiteUrl ?? "",
+			});
+		}).catch(console.error).finally(() => setLoading(false));
+	}, [token, router]);
 
-		if (status === "authenticated" && session?.accessToken) {
-			loadProfile();
-		}
-	}, [status, session, router]);
+	const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+		setForm(f => ({ ...f, [k]: e.target.value }));
 
-	useEffect(() => {
-		// Only check username availability if:
-		// 1. Username is different from original (user is actually changing it)
-		// 2. Username is at least 3 characters
-		// 3. We have an original username (profile exists)
-		if (
-			watchedUsername && 
-			watchedUsername.length >= 3 &&
-			originalUsername &&
-			watchedUsername !== originalUsername
-		) {
-			checkUsername(watchedUsername);
-		} else if (watchedUsername === originalUsername) {
-			// Username is back to original, clear the availability indicator
-			setUsernameAvailable(null);
-		} else if (!watchedUsername || watchedUsername.length < 3) {
-			setUsernameAvailable(null);
-		}
-	}, [watchedUsername, originalUsername]);
-
-	const loadProfile = async () => {
+	const handleSave = async () => {
+		setSaving(true); setSaved(false);
 		try {
-			const response = await profileApi.get(session!.accessToken as string);
-			if (response.success && response.data.profile) {
-				const profileData = response.data.profile;
-				setProfile(profileData);
-				setValue("username", profileData.username);
-				setValue("displayName", profileData.displayName);
-				setValue("bio", profileData.bio || "");
-				setValue("font", profileData.font || "");
-				setValue("avatar", profileData.avatar || "");
-				setValue("backgroundImage", profileData.backgroundImage || "");
-				setAvatarPreview(profileData.avatar || "");
-				setBackgroundPreview(profileData.backgroundImage || "");
-				
-				// Store original username to detect changes
-				setOriginalUsername(profileData.username);
-				
-				// Load colors if they exist
-				if (profileData.colors) {
-					const loadedColors = {
-						background: profileData.colors.background || "#0a0a0f",
-						text: profileData.colors.text || "#f8f9fa",
-						button: profileData.colors.button || "#8b5cf6",
-						buttonHover: profileData.colors.buttonHover || "#7c3aed",
-					};
-					setColors(loadedColors);
-					setValue("colors", loadedColors);
-				}
-			} else {
-				// New user - no original username
-				setOriginalUsername("");
-			}
-		} catch (err: any) {
-			if (err.message.includes("not found")) {
-				setProfile(null);
-			} else {
-				setError(err.message || "Failed to load profile");
-			}
-		} finally {
-			setIsLoading(false);
-		}
-	};
-
-	const checkUsername = async (username: string) => {
-		try {
-			const response = await profileApi.checkUsername(username);
-			if (response.success) {
-				setUsernameAvailable(response.data.available);
-			}
-		} catch (err) {
-			setUsernameAvailable(false);
-		}
-	};
-
-	const onSubmit = async (data: ProfileFormData) => {
-		setIsSaving(true);
-		setError("");
-
-		try {
-			const token = session!.accessToken as string;
-			const submitData = {
-				...data,
-				backgroundImage: backgroundPreview,
-				colors: colors,
+			const payload: Record<string, unknown> = {
+				username: form.username,
+				displayName: form.displayName,
+				bio: form.bio,
+				font: form.font,
+				headline: form.headline,
+				location: form.location,
+				timezone: form.timezone,
+				availabilityStatus: form.availabilityStatus,
+				hourlyRateMin: form.hourlyRateMin ? Number(form.hourlyRateMin) : null,
+				hourlyRateMax: form.hourlyRateMax ? Number(form.hourlyRateMax) : null,
+				projectRateMin: form.projectRateMin ? Number(form.projectRateMin) : null,
+				projectRateMax: form.projectRateMax ? Number(form.projectRateMax) : null,
+				currency: form.currency,
+				calendlyUrl: form.calendlyUrl || null,
+				contactEmail: form.contactEmail || null,
+				servicesOffered: form.servicesOffered,
+				twitterUrl: form.twitterUrl || null,
+				linkedinUrl: form.linkedinUrl || null,
+				githubUrl: form.githubUrl || null,
+				websiteUrl: form.websiteUrl || null,
 			};
-			if (profile) {
-				await profileApi.update(submitData, token);
-			} else {
-				await profileApi.create(submitData, token);
-			}
-			router.push("/dashboard");
-		} catch (err: any) {
-			setError(err.message || "Failed to save profile");
+			await profileApi.update(payload, token);
+			setSaved(true);
+			setTimeout(() => setSaved(false), 2500);
+		} catch (e: any) {
+			alert(e.message);
 		} finally {
-			setIsSaving(false);
+			setSaving(false);
 		}
 	};
 
-	if (status === "loading" || isLoading) {
+	const handleGenerateBio = async () => {
+		setGeneratingBio(true);
+		try {
+			const r = await bioTemplateApi.generate(wizardAnswers, token);
+			setForm(f => ({ ...f, bio: r.data.bio }));
+			setWizardOpen(false);
+		} catch (e: any) {
+			alert(e.message);
+		} finally {
+			setGeneratingBio(false);
+		}
+	};
+
+	const addService = () => {
+		const s = serviceInput.trim();
+		if (s && !form.servicesOffered.includes(s)) {
+			setForm(f => ({ ...f, servicesOffered: [...f.servicesOffered, s] }));
+		}
+		setServiceInput("");
+	};
+
+	const removeService = (s: string) => setForm(f => ({ ...f, servicesOffered: f.servicesOffered.filter(x => x !== s) }));
+
+	if (loading) {
 		return (
-			<div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)]">
-				<LoadingSpinner />
+			<div className="flex justify-center items-center h-64">
+				<Loader2 size={24} className="animate-spin text-[var(--accent-primary)]" />
 			</div>
 		);
 	}
 
-	if (!session) {
-		return null;
-	}
+	const TABS = [
+		{ id: "identity" as const, label: "Identity", icon: User },
+		{ id: "hireme" as const, label: "Hire Me", icon: Briefcase },
+		{ id: "socials" as const, label: "Socials", icon: Link2 },
+	];
 
 	return (
-		<div className="min-h-screen bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-[var(--bg-tertiary)]">
-			{/* Navigation */}
-			<nav className="bg-[var(--card-bg)]/80 backdrop-blur-xl border-b border-[var(--card-border)]">
-				<div className="container mx-auto px-4 py-4">
-					<Button
-						variant="secondary"
-						onClick={() => router.push("/dashboard")}
-						className="flex items-center gap-2"
+		<div className="max-w-2xl">
+			<motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+				<h1 className="text-2xl font-black mb-1 flex items-center gap-2">
+					<Settings size={22} className="text-[var(--accent-light)]" />
+					Profile Settings
+				</h1>
+				<p className="text-[var(--text-muted)] text-sm mb-8">Manage your public profile and hire-me panel.</p>
+			</motion.div>
+
+			{/* Tabs */}
+			<div className="flex gap-1 mb-6 p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--card-border)]">
+				{TABS.map(({ id, label, icon: Icon }) => (
+					<button
+						key={id}
+						onClick={() => setTab(id)}
+						className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${
+							tab === id
+								? "bg-[var(--accent-primary)] text-white"
+								: "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+						}`}
 					>
-						<ArrowLeft size={18} />
-						Back to Dashboard
-					</Button>
-				</div>
-			</nav>
+						<Icon size={15} />{label}
+					</button>
+				))}
+			</div>
 
-			<main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-2xl">
-				<motion.div
-					initial={{ opacity: 0, y: 20 }}
-					animate={{ opacity: 1, y: 0 }}
-				>
-					<Card>
-						<CardContent className="p-4 sm:p-6">
-							<h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 text-[var(--text-primary)]">
-								{profile ? "Edit Profile" : "Create Profile"}
-							</h2>
+			{/* Identity tab */}
+			{tab === "identity" && (
+				<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+					<div className="grid grid-cols-2 gap-4">
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Username</label>
+							<input className="input" value={form.username} onChange={set("username")} placeholder="yourname" />
+						</div>
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Display name</label>
+							<input className="input" value={form.displayName} onChange={set("displayName")} placeholder="Your Name" />
+						</div>
+					</div>
 
-						<AnimatePresence>
-							{error && (
-								<motion.div
-									initial={{ opacity: 0, x: -20 }}
-									animate={{ opacity: 1, x: 0 }}
-									exit={{ opacity: 0, x: 20 }}
-									className="mb-4 px-4 py-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-500"
-								>
-									{error}
-								</motion.div>
-							)}
-						</AnimatePresence>
+					<div>
+						<div className="flex items-center justify-between mb-1">
+							<label className="text-xs text-[var(--text-muted)]">Bio</label>
+							<button onClick={() => setWizardOpen(!wizardOpen)} className="text-xs text-[var(--accent-light)] hover:underline flex items-center gap-1">
+								<Bot size={12} /> 3-question wizard
+							</button>
+						</div>
 
-						<form onSubmit={handleSubmit(onSubmit)} className="space-y-4 sm:space-y-6">
-							<div>
-								<Input
-									{...register("username")}
-									type="text"
-									label="Username"
-									placeholder="johndoe"
-									error={errors.username?.message}
-								/>
-								{watchedUsername && 
-								 watchedUsername.length >= 3 && 
-								 originalUsername &&
-								 watchedUsername !== originalUsername &&
-								 usernameAvailable !== null && (
-									<motion.div
-										initial={{ opacity: 0 }}
-										animate={{ opacity: 1 }}
-										className={`mt-2 flex items-center gap-2 text-sm ${
-											usernameAvailable ? "text-green-500" : "text-red-500"
-										}`}
-									>
-										{usernameAvailable ? (
-											<>
-												<Check size={16} />
-												Username available
-											</>
-										) : (
-											<>
-												<X size={16} />
-												Username taken
-											</>
-										)}
-									</motion.div>
-								)}
-								<p className="mt-1 text-xs text-[var(--text-secondary)]">
-									Your profile will be available at /{watchedUsername || "username"}
-								</p>
-							</div>
+						{wizardOpen && (
+							<motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="card-glass p-4 mb-3 space-y-3">
+								<input className="input text-sm" placeholder="Your primary role (e.g. React developer)" value={wizardAnswers.role} onChange={e => setWizardAnswers(w => ({ ...w, role: e.target.value }))} />
+								<input className="input text-sm" placeholder="Years of experience" value={wizardAnswers.yearsExp} onChange={e => setWizardAnswers(w => ({ ...w, yearsExp: e.target.value }))} />
+								<input className="input text-sm" placeholder="Your specialty (e.g. e-commerce builds)" value={wizardAnswers.specialty} onChange={e => setWizardAnswers(w => ({ ...w, specialty: e.target.value }))} />
+								<button onClick={handleGenerateBio} disabled={generatingBio} className="btn-primary w-full text-sm">
+									{generatingBio ? <Loader2 size={14} className="animate-spin" /> : "Generate bio"}
+								</button>
+							</motion.div>
+						)}
 
-							<Input
-								{...register("displayName")}
-								type="text"
-								label="Display Name"
-								placeholder="John Doe"
-								error={errors.displayName?.message}
-							/>
+						<textarea className="input resize-none h-28" value={form.bio} onChange={set("bio")} placeholder="A short bio…" />
+					</div>
 
-							<AvatarUpload
-								value={avatarPreview}
-								onChange={(value) => {
-									setAvatarPreview(value);
-									setValue("avatar", value);
-								}}
-							/>
-
-							<Textarea
-								{...register("bio")}
-								label="Bio (Optional)"
-								placeholder="Tell us about yourself..."
-								rows={4}
-							/>
-
-							<div>
-								<label className="block mb-2 text-[var(--text-secondary)] font-medium">
-									Font (Optional)
-								</label>
-								<select
-									{...register("font")}
-									className="w-full px-4 py-3 bg-[var(--input-bg)] border border-[var(--input-border)] rounded-xl text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-purple)] focus:border-transparent transition-all"
-								>
-									{GOOGLE_FONTS.map((font) => (
-										<option key={font.value} value={font.value}>
-											{font.label}
-										</option>
-									))}
-								</select>
-								<p className="mt-1 text-xs text-[var(--text-secondary)]">
-									Choose a font for your public profile page
-								</p>
-							</div>
-
-							{/* Background Image */}
-							<BackgroundUpload
-								value={backgroundPreview}
-								onChange={(value) => {
-									setBackgroundPreview(value);
-									setValue("backgroundImage", value);
-									
-									// Auto-adjust colors for readability when background image is uploaded/removed
-									if (value) {
-										// Background image uploaded - use white text for readability
-										const smartColors = {
-											background: colors.background, // Keep user's choice or default
-											text: "#ffffff", // Always white text for readability
-											button: "#8b5cf6", // Keep purple or user's choice
-											buttonHover: "#7c3aed",
-										};
-										setColors(smartColors);
-										setValue("colors", smartColors);
-									} else {
-										// Background image removed - reset to default colors
-										const defaultColors = {
-											background: "#0a0a0f",
-											text: "#f8f9fa",
-											button: "#8b5cf6",
-											buttonHover: "#7c3aed",
-										};
-										setColors(defaultColors);
-										setValue("colors", defaultColors);
-									}
-								}}
-							/>
-
-							{/* Color Customization - Collapsible */}
-							<div className="space-y-4 p-3 sm:p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--card-border)]">
-								<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-									<div className="flex items-center gap-2">
-										<Sparkles size={18} className="text-[var(--accent-purple)]" />
-										<h3 className="text-base sm:text-lg font-semibold text-[var(--text-primary)]">
-											Color Customization
-										</h3>
-									</div>
-									<div className="flex items-center gap-2 w-full sm:w-auto">
-										<Button
-											type="button"
-											variant="outline"
-											size="sm"
-											onClick={() => {
-												// Smart Mode: Auto-adjust colors for best readability
-												const smartColors = backgroundPreview
-													? {
-															background: "#0a0a0f",
-															text: "#ffffff", // White text for background images
-															button: "#8b5cf6",
-															buttonHover: "#7c3aed",
-													  }
-													: {
-															background: "#0a0a0f",
-															text: "#f8f9fa",
-															button: "#8b5cf6",
-															buttonHover: "#7c3aed",
-													  };
-												setColors(smartColors);
-												setValue("colors", smartColors);
-											}}
-											className="flex items-center gap-1"
-										>
-											<Sparkles size={14} />
-											Smart Mode
-										</Button>
-										<Button
-											type="button"
-											variant="ghost"
-											size="sm"
-											onClick={() => setShowColorCustomization(!showColorCustomization)}
-											className="flex items-center gap-1"
-										>
-											{showColorCustomization ? (
-												<>
-													<ChevronUp size={16} />
-													Hide
-												</>
-											) : (
-												<>
-													<ChevronDown size={16} />
-													Advanced
-												</>
-											)}
-										</Button>
-									</div>
-								</div>
-								
-								{backgroundPreview && (
-									<div className="px-3 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-										<p className="text-sm text-blue-400">
-											💡 <strong>Tip:</strong> Text color is automatically set to white for better readability with background images. Use Smart Mode to optimize all colors.
-										</p>
-									</div>
-								)}
-
-								{showColorCustomization && (
-									<motion.div
-										initial={{ opacity: 0, height: 0 }}
-										animate={{ opacity: 1, height: "auto" }}
-										exit={{ opacity: 0, height: 0 }}
-										className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-2"
-									>
-										<ColorPicker
-											label="Background Color"
-											value={colors.background}
-											onChange={(value) => {
-												const newColors = { ...colors, background: value };
-												setColors(newColors);
-												setValue("colors", newColors);
-											}}
-										/>
-										<ColorPicker
-											label="Text Color"
-											value={colors.text}
-											onChange={(value) => {
-												const newColors = { ...colors, text: value };
-												setColors(newColors);
-												setValue("colors", newColors);
-											}}
-										/>
-										<ColorPicker
-											label="Button Color"
-											value={colors.button}
-											onChange={(value) => {
-												const newColors = { ...colors, button: value };
-												setColors(newColors);
-												setValue("colors", newColors);
-											}}
-										/>
-										<ColorPicker
-											label="Button Hover Color"
-											value={colors.buttonHover}
-											onChange={(value) => {
-												const newColors = { ...colors, buttonHover: value };
-												setColors(newColors);
-												setValue("colors", newColors);
-											}}
-										/>
-									</motion.div>
-								)}
-							</div>
-
-							{/* Live Preview */}
-							<div className="p-3 sm:p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--card-border)]">
-								<h3 className="text-base sm:text-lg font-semibold text-[var(--text-primary)] mb-3 sm:mb-4">
-									Live Preview
-								</h3>
-								<div
-									className="relative rounded-lg overflow-hidden border-2 border-[var(--card-border)]"
-									style={{
-										backgroundColor: colors.background,
-										backgroundImage: backgroundPreview ? `url(${backgroundPreview})` : undefined,
-										backgroundSize: "cover",
-										backgroundPosition: "center",
-										minHeight: "250px",
-									}}
-								>
-									{/* Dark overlay for background images in preview */}
-									{backgroundPreview && (
-										<div className="absolute inset-0 bg-black/60 z-0" />
-									)}
-									<div className="p-4 sm:p-6 space-y-3 sm:space-y-4 relative z-10">
-										{/* Avatar Preview */}
-										<div className="flex justify-center">
-											{avatarPreview ? (
-												<img
-													src={avatarPreview}
-													alt="Preview"
-													className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-4"
-													style={{ borderColor: colors.button }}
-												/>
-											) : (
-												<div
-													className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center text-xl sm:text-2xl font-bold"
-													style={{
-														backgroundColor: colors.button,
-														color: colors.text,
-													}}
-												>
-													{watch("displayName")?.charAt(0).toUpperCase() || "U"}
-												</div>
-											)}
-										</div>
-										
-										{/* Display Name Preview */}
-										<h2
-											className="text-xl sm:text-2xl font-bold text-center px-2"
-											style={{ color: colors.text }}
-										>
-											{watch("displayName") || "Display Name"}
-										</h2>
-										
-										{/* Bio Preview */}
-										{watch("bio") && (
-											<p
-												className="text-sm text-center"
-												style={{ color: colors.text, opacity: 0.8 }}
-											>
-												{watch("bio")}
-											</p>
-										)}
-										
-										{/* Button Preview */}
-										<div className="flex justify-center pt-4">
-											<button
-												type="button"
-												className="px-6 py-3 rounded-lg font-medium transition-colors"
-												style={{
-													backgroundColor: colors.button,
-													color: "#ffffff",
-												}}
-												onMouseEnter={(e) => {
-													e.currentTarget.style.backgroundColor = colors.buttonHover;
-												}}
-												onMouseLeave={(e) => {
-													e.currentTarget.style.backgroundColor = colors.button;
-												}}
-											>
-												Sample Link
-											</button>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							<div className="flex flex-col sm:flex-row justify-end gap-3 pt-4">
-								<Button
-									type="button"
-									variant="outline"
-									onClick={() => router.push("/dashboard")}
-									className="w-full sm:w-auto"
-								>
-									Cancel
-								</Button>
-								<Button
-									type="submit"
-									disabled={isSaving || (usernameAvailable === false && !profile)}
-									className="w-full sm:w-auto"
-								>
-									{isSaving ? <LoadingSpinner /> : profile ? "Update Profile" : "Create Profile"}
-								</Button>
-							</div>
-						</form>
-						</CardContent>
-					</Card>
+					<div>
+						<label className="text-xs text-[var(--text-muted)] mb-1 block">Font preference</label>
+						<input className="input" value={form.font} onChange={set("font")} placeholder="Inter, Mono, etc." />
+					</div>
 				</motion.div>
-			</main>
+			)}
+
+			{/* Hire me tab */}
+			{tab === "hireme" && (
+				<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+					<div>
+						<label className="text-xs text-[var(--text-muted)] mb-1 block">Headline</label>
+						<input className="input" value={form.headline} onChange={set("headline")} placeholder="Full-Stack React / Node.js developer" />
+					</div>
+
+					<div className="grid grid-cols-2 gap-4">
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Location</label>
+							<input className="input" value={form.location} onChange={set("location")} placeholder="London, UK" />
+						</div>
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Timezone</label>
+							<input className="input" value={form.timezone} onChange={set("timezone")} placeholder="GMT+0" />
+						</div>
+					</div>
+
+					<div>
+						<label className="text-xs text-[var(--text-muted)] mb-1 block">Availability</label>
+						<select className="input" value={form.availabilityStatus} onChange={set("availabilityStatus")}>
+							{AVAILABILITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+						</select>
+					</div>
+
+					<div className="grid grid-cols-3 gap-3">
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Hourly min</label>
+							<input className="input" type="number" value={form.hourlyRateMin} onChange={set("hourlyRateMin")} placeholder="50" />
+						</div>
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Hourly max</label>
+							<input className="input" type="number" value={form.hourlyRateMax} onChange={set("hourlyRateMax")} placeholder="150" />
+						</div>
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Currency</label>
+							<select className="input" value={form.currency} onChange={set("currency")}>
+								{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+							</select>
+						</div>
+					</div>
+
+					<div className="grid grid-cols-2 gap-4">
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Calendly URL</label>
+							<input className="input" value={form.calendlyUrl} onChange={set("calendlyUrl")} placeholder="https://calendly.com/you" />
+						</div>
+						<div>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">Contact email</label>
+							<input className="input" type="email" value={form.contactEmail} onChange={set("contactEmail")} placeholder="hello@you.com" />
+						</div>
+					</div>
+
+					<div>
+						<label className="text-xs text-[var(--text-muted)] mb-1 block">Services offered</label>
+						<div className="flex gap-2">
+							<input
+								className="input flex-1"
+								value={serviceInput}
+								onChange={e => setServiceInput(e.target.value)}
+								onKeyDown={e => e.key === "Enter" && addService()}
+								placeholder="e.g. Web Development"
+							/>
+							<button onClick={addService} className="btn-secondary px-4 text-sm shrink-0">Add</button>
+						</div>
+						<div className="flex flex-wrap gap-2 mt-2">
+							{form.servicesOffered.map(s => (
+								<span key={s} className="badge cursor-pointer hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition-colors" onClick={() => removeService(s)}>
+									{s} ×
+								</span>
+							))}
+						</div>
+					</div>
+				</motion.div>
+			)}
+
+			{/* Socials tab */}
+			{tab === "socials" && (
+				<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+					{[
+						{ key: "twitterUrl" as const, label: "Twitter / X URL" },
+						{ key: "linkedinUrl" as const, label: "LinkedIn URL" },
+						{ key: "githubUrl" as const, label: "GitHub URL" },
+						{ key: "websiteUrl" as const, label: "Personal website" },
+					].map(({ key, label }) => (
+						<div key={key}>
+							<label className="text-xs text-[var(--text-muted)] mb-1 block">{label}</label>
+							<input className="input" value={form[key]} onChange={set(key)} placeholder="https://…" />
+						</div>
+					))}
+				</motion.div>
+			)}
+
+			{/* Save */}
+			<div className="mt-8 flex justify-end">
+				<button onClick={handleSave} disabled={saving} className="btn-primary px-8">
+					{saving ? <Loader2 size={16} className="animate-spin" /> : saved ? <><Check size={16} /> Saved</> : "Save changes"}
+				</button>
+			</div>
 		</div>
 	);
 }

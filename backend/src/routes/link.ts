@@ -6,6 +6,7 @@ import {
 	deleteLink,
 	validateLink,
 	getPublicLinks,
+	getPublicLink,
 	trackLinkClick,
 } from "../controllers/linkController.js";
 import { authenticate } from "../middleware/auth.js";
@@ -14,6 +15,7 @@ const router = express.Router();
 
 // Public routes
 router.get("/public/:username", getPublicLinks);
+router.get("/public/:username/:id", getPublicLink);
 router.get("/track/:id", trackLinkClick);
 
 // Protected routes (require authentication)

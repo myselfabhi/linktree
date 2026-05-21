@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile Profile?
+
+  @@map("users")
+}
+
+enum AvailabilityStatus {
+  available
+  available_from
+  booked
+  not_specified
+}
+
+model Profile {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @db.Uuid
+  username        String   @unique
+  displayName     String
+  bio             String?
+  avatar          String?
+  theme           Json?
+  colors          Json?
+  font            String?
+  backgroundImage String?
+  views           Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Hire-me panel
+  headline             String?
+  location             String?
+  timezone             String?
+  availabilityStatus   AvailabilityStatus @default(not_specified)
+  availableFrom        DateTime?
+  hourlyRateMin        Int?
+  hourlyRateMax        Int?
+  projectRateMin       Int?
+  projectRateMax       Int?
+  currency             String?            @default("USD")
+  calendlyUrl          String?
+  contactEmail         String?
+  servicesOffered      String[]           @default([])
+
+  // Socials
+  twitterUrl   String?
+  linkedinUrl  String?
+  githubUrl    String?
+  websiteUrl   String?
+
+  // Custom domain (future)
+  customDomain         String?  @unique
+  customDomainVerified Boolean  @default(false)
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links        Link[]
+  testimonials Testimonial[]
+  briefs       ProjectBrief[]
+  viewsLog     ProfileView[]
+
+  @@map("profiles")
+}
+
+enum LinkRole {
+  Frontend
+  Backend
+  FullStack @map("Full Stack")
+}
+
+enum LinkStatus {
+  live
+  down
+  slow
+  unknown
+}
+
+model Link {
+  id                     String      @id @default(uuid()) @db.Uuid
+  profileId              String      @db.Uuid
+  title                  String
+  url                    String?
+  description            String?
+  order                  Int         @default(0)
+  clicks                 Int         @default(0)
+  techStack              String[]    @default([])
+  role                   LinkRole    @default(FullStack)
+  githubUrl              String?
+  status                 LinkStatus  @default(unknown)
+  lastCheckedAt          DateTime?
+  screenshotUrl          String?
+  githubStars            Int?
+  lastCommitDate         DateTime?
+  lastCommitMessage      String?
+  lighthousePerformance  Int?
+  lighthouseAccessibility Int?
+  lighthouseBestPractices Int?
+  lighthouseSEO          Int?
+  lighthouseLastRun      DateTime?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  // Case study fields
+  problemStatement String?
+  outcomeSummary   String?
+  outcomeMetric    String?
+  clientName       String?
+  clientCompany    String?
+  teamSize         Int?
+  myContribution   String?
+  walkthroughUrl   String?
+  caseStudyBody    String?
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, order])
+  @@map("links")
+}
+
+model Testimonial {
+  id             String   @id @default(uuid()) @db.Uuid
+  profileId      String   @db.Uuid
+  quote          String
+  authorName     String
+  authorRole     String?
+  authorCompany  String?
+  authorAvatar   String?
+  authorLinkedIn String?
+  verified       Boolean  @default(false)
+  verifiedVia    String?
+  submittedAt    DateTime @default(now())
+  approvedAt     DateTime?
+  approved       Boolean  @default(false)
+  requestToken   String?  @unique
+  requestedFor   String?
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, approved])
+  @@map("testimonials")
+}
+
+model ProjectBrief {
+  id          String   @id @default(uuid()) @db.Uuid
+  profileId   String   @db.Uuid
+  fromName    String
+  fromEmail   String
+  fromCompany String?
+  budgetMin   Int?
+  budgetMax   Int?
+  currency    String?
+  timeline    String?
+  scope       String
+  read        Boolean  @default(false)
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, createdAt])
+  @@map("project_briefs")
+}
+
+model ProfileView {
+  id             String   @id @default(uuid()) @db.Uuid
+  profileId      String   @db.Uuid
+  sessionId      String
+  referrer       String?
+  country        String?
+  city           String?
+  userAgent      String?
+  durationMs     Int?
+  projectsOpened String[] @default([])
+  createdAt      DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, createdAt])
+  @@map("profile_views")
+}

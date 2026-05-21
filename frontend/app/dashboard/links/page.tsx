@@ -1,1002 +1,392 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-	Link2,
-	Pencil,
-	Trash2,
-	Plus,
-	ChevronLeft,
-	X,
-	ExternalLink,
-	ChartBar,
-	AlertTriangle,
-	CheckCircle2,
-	Loader2,
+	Plus, Trash2, ExternalLink, Github, ChevronDown, ChevronUp,
+	FolderKanban, CheckCircle, AlertCircle, Clock, Zap, Star, Loader2, Save,
 } from "lucide-react";
-import {
-	Modal,
-	ModalContent,
-	ModalHeader,
-	ModalTitle,
-	ModalDescription,
-	ModalFooter,
-} from "@/components/ui/modal";
-import { linkApi, githubApi } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
-import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
+import { linkApi } from "@/lib/api";
+import type { ProjectLink } from "@/app/types/profile";
 
-const linkSchema = z.object({
-	title: z.string().min(1, "Title is required"),
-	url: z.string().url("Invalid hosted URL format").optional().or(z.literal("")),
-	description: z.string().optional(),
-	techStack: z.array(z.string()).optional(),
-	role: z.enum(["Frontend", "Backend", "Full Stack"]).optional(),
-	githubUrl: z.string().url("Invalid GitHub URL format").optional().or(z.literal("")),
-});
+const ROLE_OPTIONS = ["Full Stack", "Frontend", "Backend"] as const;
+const TECH_SUGGESTIONS = ["React", "Next.js", "TypeScript", "Node.js", "PostgreSQL", "Tailwind", "Prisma", "Docker", "AWS", "Vercel"];
 
-type LinkFormData = z.infer<typeof linkSchema>;
-
-interface Link {
-	_id: string;
-	title: string;
-	url?: string;
-	description?: string;
-	techStack?: string[];
-	role?: "Frontend" | "Backend" | "Full Stack";
-	githubUrl?: string;
-	status?: "live" | "down" | "slow" | "unknown";
-	lastCheckedAt?: Date;
-	screenshotUrl?: string;
-	order: number;
-	clicks: number;
+function statusIcon(status: string) {
+	if (status === "live")    return <CheckCircle size={14} className="text-green-400" />;
+	if (status === "down")    return <AlertCircle size={14} className="text-red-400" />;
+	if (status === "slow")    return <Clock size={14} className="text-yellow-400" />;
+	return <span className="w-2 h-2 rounded-full bg-gray-500 inline-block" />;
 }
 
-// Link Item Component
-function LinkItem({
-	link,
-	onEdit,
-	onDelete,
-	index,
-}: {
-	link: Link;
-	onEdit: (link: Link) => void;
-	onDelete: (id: string) => void;
-	index: number;
-}) {
-	return (
-		<motion.div
-			initial={{ opacity: 0, y: 20 }}
-			animate={{ opacity: 1, y: 0 }}
-			transition={{ delay: index * 0.05 }}
-			whileHover={{ scale: 1.02 }}
-			className="bg-[var(--bg-secondary)] border border-[var(--card-border)] rounded-xl p-3 sm:p-4 transition-all duration-200"
-		>
-					<div className="flex items-start gap-3 sm:gap-4">
-				{/* Link Info */}
-				<div className="flex-1 min-w-0">
-					<div className="flex items-start justify-between gap-4 mb-2">
-						<div className="flex-1 min-w-0">
-							<h3 className="mb-1 truncate text-[var(--text-primary)] font-semibold">
-								{link.title}
-							</h3>
-							<div className="flex items-center gap-2 text-sm text-[var(--accent-purple)] mb-2">
-								<ExternalLink size={14} />
-								<span className="truncate">{link.url}</span>
-							</div>
-							{link.description && (
-								<p className="text-sm text-[var(--text-secondary)] line-clamp-2">
-									{link.description}
-								</p>
-							)}
-							{link.techStack && link.techStack.length > 0 && (
-								<div className="flex flex-wrap gap-1 mt-2">
-									{link.techStack.map((tech, idx) => (
-										<span
-											key={idx}
-											className="px-2 py-0.5 text-xs bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] rounded-md"
-										>
-											{tech}
-										</span>
-									))}
-								</div>
-							)}
-							{link.role && (
-								<span className="inline-block mt-2 px-2 py-0.5 text-xs bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md">
-									{link.role}
-								</span>
-							)}
-							{link.githubUrl && (
-								<a
-									href={link.githubUrl}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="inline-flex items-center gap-1 mt-2 text-sm text-[var(--accent-purple)] hover:underline"
-								>
-									<ExternalLink size={14} />
-									GitHub
-								</a>
-							)}
-						</div>
-
-						{/* Actions */}
-						<div className="flex items-center gap-2 flex-shrink-0">
-							<motion.button
-								whileHover={{ scale: 1.1 }}
-								whileTap={{ scale: 0.9 }}
-								onClick={() => onEdit(link)}
-								className="p-2 text-[var(--text-secondary)] hover:text-[var(--accent-purple)] transition-colors"
-							>
-								<Pencil size={18} />
-							</motion.button>
-							<motion.button
-								whileHover={{ scale: 1.1 }}
-								whileTap={{ scale: 0.9 }}
-								onClick={() => onDelete(link._id)}
-								className="p-2 text-[var(--text-secondary)] hover:text-red-500 transition-colors"
-							>
-								<Trash2 size={18} />
-							</motion.button>
-						</div>
-					</div>
-
-					{/* Stats */}
-					<div className="flex items-center gap-4 text-sm">
-						<div className="flex items-center gap-1 text-[var(--text-secondary)]">
-							<ChartBar size={14} />
-							<span>{link.clicks || 0} clicks</span>
-						</div>
-					</div>
-				</div>
-			</div>
-		</motion.div>
-	);
+function perfGrade(score?: number | null) {
+	if (score == null) return null;
+	if (score >= 90) return { grade: "A", cls: "perf-A" };
+	if (score >= 70) return { grade: "B", cls: "perf-B" };
+	if (score >= 50) return { grade: "C", cls: "perf-C" };
+	return { grade: "D", cls: "perf-D" };
 }
 
-export default function LinksPage() {
-	const { data: session, status } = useSession();
-	const router = useRouter();
-	const [links, setLinks] = useState<Link[]>([]);
-	const [isLoading, setIsLoading] = useState(true);
-	const [isModalOpen, setIsModalOpen] = useState(false);
-	const [editingLink, setEditingLink] = useState<Link | null>(null);
-	const [error, setError] = useState<string>("");
-	const [techStackInput, setTechStackInput] = useState<string>("");
-	const [githubUrlInput, setGithubUrlInput] = useState<string>("");
-	const [isFetchingGitHub, setIsFetchingGitHub] = useState(false);
-	const [showGitHubModal, setShowGitHubModal] = useState(false);
-	const [showConfirmModal, setShowConfirmModal] = useState(false);
-	const [fetchedData, setFetchedData] = useState<any>(null);
-	const [confirmHostedUrl, setConfirmHostedUrl] = useState<string>("");
-	const [showMissingUrlModal, setShowMissingUrlModal] = useState(false);
-	const [showDeleteModal, setShowDeleteModal] = useState(false);
-	const [linkToDelete, setLinkToDelete] = useState<string | null>(null);
+interface EditState {
+	title: string; url: string; description: string; githubUrl: string;
+	role: string; techStack: string[];
+	problemStatement: string; outcomeSummary: string; outcomeMetric: string;
+	clientName: string; clientCompany: string; teamSize: string;
+	myContribution: string; walkthroughUrl: string; caseStudyBody: string;
+}
 
-	const {
-		register,
-		handleSubmit,
-		formState: { errors },
-		reset,
-		setValue,
-	} = useForm<LinkFormData>({
-		resolver: zodResolver(linkSchema),
-		defaultValues: {
-			role: "Full Stack",
-			techStack: [],
-		},
-	});
+function emptyEdit(link?: ProjectLink): EditState {
+	return {
+		title: link?.title ?? "",
+		url: link?.url ?? "",
+		description: link?.description ?? "",
+		githubUrl: link?.githubUrl ?? "",
+		role: link?.role ?? "Full Stack",
+		techStack: link?.techStack ?? [],
+		problemStatement: link?.problemStatement ?? "",
+		outcomeSummary: link?.outcomeSummary ?? "",
+		outcomeMetric: link?.outcomeMetric ?? "",
+		clientName: link?.clientName ?? "",
+		clientCompany: link?.clientCompany ?? "",
+		teamSize: link?.teamSize?.toString() ?? "",
+		myContribution: link?.myContribution ?? "",
+		walkthroughUrl: link?.walkthroughUrl ?? "",
+		caseStudyBody: link?.caseStudyBody ?? "",
+	};
+}
+
+export default function ProjectsPage() {
+	const { data: session } = useSession();
+	const [links, setLinks] = useState<ProjectLink[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [expanded, setExpanded] = useState<string | null>(null);
+	const [edits, setEdits] = useState<Record<string, EditState>>({});
+	const [saving, setSaving] = useState<string | null>(null);
+	const [validating, setValidating] = useState<string | null>(null);
+	const [deleting, setDeleting] = useState<string | null>(null);
+	const [addOpen, setAddOpen] = useState(false);
+	const [addForm, setAddForm] = useState({ title: "", url: "", description: "", role: "Full Stack", githubUrl: "" });
+	const [adding, setAdding] = useState(false);
+	const [techInput, setTechInput] = useState<Record<string, string>>({});
+
+	const token = session?.accessToken as string;
 
 	useEffect(() => {
-		if (status === "unauthenticated") {
-			router.push("/login");
-			return;
-		}
+		if (!token) return;
+		linkApi.getAll(token).then(r => {
+			const ls = r.data.links ?? [];
+			setLinks(ls);
+			const init: Record<string, EditState> = {};
+			ls.forEach((l: ProjectLink) => { init[l.id] = emptyEdit(l); });
+			setEdits(init);
+		}).catch(console.error).finally(() => setLoading(false));
+	}, [token]);
 
-		if (status === "authenticated" && session?.accessToken) {
-			loadLinks();
-		}
-	}, [status, session, router]);
+	const toggle = (id: string) => setExpanded(e => e === id ? null : id);
 
-	useEffect(() => {
-		if (showConfirmModal) {
-			setError("");
-		}
-	}, [showConfirmModal]);
+	const setEdit = (id: string, k: keyof EditState, v: string | string[]) =>
+		setEdits(e => ({ ...e, [id]: { ...e[id], [k]: v } }));
 
-	const loadLinks = async () => {
+	const handleSave = async (id: string) => {
+		setSaving(id);
 		try {
-			const response = await linkApi.getAll(session!.accessToken as string);
-			if (response.success) {
-				setLinks(response.data.links);
-			}
-		} catch (err: any) {
-			setError(err.message || "Failed to load links");
-		} finally {
-			setIsLoading(false);
-		}
-	};
-
-	const openCreateModal = () => {
-		setEditingLink(null);
-		setTechStackInput("");
-		setGithubUrlInput("");
-		setFetchedData(null);
-		setConfirmHostedUrl("");
-		setError("");
-		reset();
-		setShowGitHubModal(true);
-		setIsModalOpen(false);
-	};
-
-	const openEditModal = (link: Link) => {
-		setEditingLink(link);
-		setTechStackInput(link.techStack?.join(", ") || "");
-		setGithubUrlInput(link.githubUrl || "");
-		reset({
-			title: link.title,
-			url: link.url,
-			description: link.description || "",
-			techStack: link.techStack || [],
-			role: link.role || "Full Stack",
-			githubUrl: link.githubUrl || "",
-		});
-		setIsModalOpen(true);
-	};
-
-	const handleConfirmProject = async () => {
-		try {
-			const token = session!.accessToken as string;
-			
-			if (!fetchedData) {
-				setError("No data to save");
-				return;
-			}
-			
-			if (confirmHostedUrl.trim()) {
-				try {
-					new URL(confirmHostedUrl.trim());
-				} catch {
-					setError("Invalid URL format. Must start with http:// or https://");
-					return;
-				}
-			}
-			
-			if (!confirmHostedUrl.trim()) {
-				setShowMissingUrlModal(true);
-				return;
-			}
-			
-			await saveProject(token);
-		} catch (err: any) {
-			setError(err.message || "Failed to save project");
-		}
-	};
-
-	const saveProject = async (token: string) => {
-		setError("");
-		
-		const apiData: any = {
-			title: fetchedData.title,
-			description: fetchedData.description || undefined,
-			techStack: fetchedData.techStack || [],
-			role: fetchedData.role || "Full Stack",
-			githubUrl: fetchedData.githubUrl || undefined,
-		};
-		
-		if (confirmHostedUrl.trim()) {
-			apiData.url = confirmHostedUrl.trim();
-		}
-		
-		await linkApi.create(apiData, token);
-		
-		setShowConfirmModal(false);
-		setShowGitHubModal(false);
-		setShowMissingUrlModal(false);
-		setFetchedData(null);
-		setConfirmHostedUrl("");
-		reset();
-		loadLinks();
-	};
-
-	const onSubmit = async (data: LinkFormData) => {
-		try {
-			const token = session!.accessToken as string;
-			const techStackArray = techStackInput
-				.split(",")
-				.map((tech) => tech.trim())
-				.filter(Boolean);
-			
-			const apiData = {
-				...data,
-				techStack: techStackArray.length > 0 ? techStackArray : undefined,
+			const e = edits[id];
+			const payload: Record<string, unknown> = {
+				...e,
+				teamSize: e.teamSize ? Number(e.teamSize) : null,
+				url: e.url || undefined,
+				githubUrl: e.githubUrl || undefined,
 			};
-			
-			if (editingLink) {
-				await linkApi.update(editingLink._id, apiData, token);
-			setIsModalOpen(false);
-				setTechStackInput("");
-			reset();
-			loadLinks();
-			}
-		} catch (err: any) {
-			setError(err.message || "Failed to save link");
-		}
-	};
-
-	const handleFetchGitHub = async () => {
-		if (!githubUrlInput.trim()) {
-			setError("Please enter a GitHub URL");
-			return;
-		}
-
-		setIsFetchingGitHub(true);
-		setError("");
-		
-		try {
-			const response = await githubApi.fetch(
-				githubUrlInput.trim(),
-				session!.accessToken as string
-			);
-			
-			if (response.success) {
-				setFetchedData(response.data);
-				setConfirmHostedUrl("");
-				setError("");
-				setShowGitHubModal(false);
-				setShowConfirmModal(true);
-			}
-		} catch (err: any) {
-			setError(err.message || "Failed to fetch GitHub repository");
+			const r = await linkApi.update(id, payload, token);
+			setLinks(ls => ls.map(l => l.id === id ? { ...l, ...r.data.link } : l));
+		} catch (e: any) {
+			alert(e.message);
 		} finally {
-			setIsFetchingGitHub(false);
+			setSaving(null);
 		}
 	};
 
-	const handleDeleteClick = (id: string) => {
-		setLinkToDelete(id);
-		setShowDeleteModal(true);
-	};
-
-	const handleDeleteConfirm = async () => {
-		if (!linkToDelete) return;
-		
+	const handleValidate = async (id: string) => {
+		setValidating(id);
 		try {
-			await linkApi.delete(linkToDelete, session!.accessToken as string);
-			setShowDeleteModal(false);
-			setLinkToDelete(null);
-			loadLinks();
-		} catch (err: any) {
-			setError(err.message || "Failed to delete link");
-			setShowDeleteModal(false);
-			setLinkToDelete(null);
+			const r = await linkApi.validate(id, token);
+			setLinks(ls => ls.map(l => l.id === id ? { ...l, status: r.data.status, lastCheckedAt: r.data.lastCheckedAt } : l));
+		} catch {}
+		setValidating(null);
+	};
+
+	const handleDelete = async (id: string) => {
+		if (!confirm("Delete this project?")) return;
+		setDeleting(id);
+		await linkApi.delete(id, token).catch(() => {});
+		setLinks(ls => ls.filter(l => l.id !== id));
+		setDeleting(null);
+	};
+
+	const handleAdd = async () => {
+		if (!addForm.title.trim()) return;
+		setAdding(true);
+		try {
+			const r = await linkApi.create({ ...addForm, role: addForm.role as any }, token);
+			const newLink = r.data.link;
+			setLinks(ls => [...ls, newLink]);
+			setEdits(e => ({ ...e, [newLink.id]: emptyEdit(newLink) }));
+			setAddOpen(false);
+			setAddForm({ title: "", url: "", description: "", role: "Full Stack", githubUrl: "" });
+		} catch (e: any) {
+			alert(e.message);
+		} finally {
+			setAdding(false);
 		}
 	};
 
-	if (status === "loading" || isLoading) {
+	const addTech = (id: string) => {
+		const v = (techInput[id] ?? "").trim();
+		if (v && !edits[id]?.techStack.includes(v)) {
+			setEdit(id, "techStack", [...(edits[id]?.techStack ?? []), v]);
+		}
+		setTechInput(t => ({ ...t, [id]: "" }));
+	};
+
+	if (loading) {
 		return (
-			<div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)]">
-				<LoadingSpinner />
+			<div className="flex justify-center items-center h-64">
+				<Loader2 size={24} className="animate-spin text-[var(--accent-primary)]" />
 			</div>
 		);
 	}
 
-	if (!session) {
-		return null;
-	}
-
 	return (
-		<div className="min-h-screen bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-secondary)] to-[var(--bg-tertiary)]">
-			{/* Navigation Bar */}
-			<motion.nav
-				initial={{ opacity: 0, y: -20 }}
-				animate={{ opacity: 1, y: 0 }}
-				className="bg-[var(--card-bg)]/80 backdrop-blur-xl border-b border-[var(--card-border)] sticky top-0 z-50"
-			>
-				<div className="container mx-auto px-4 py-3 sm:py-4 flex justify-between items-center gap-2">
-					<div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
-						<Button
-							variant="ghost"
-							onClick={() => router.push("/dashboard")}
-							className="text-[var(--text-secondary)] hover:text-[var(--accent-purple)] flex-shrink-0"
-						>
-							<ChevronLeft size={20} />
-						</Button>
-						<div className="flex items-center gap-2 min-w-0">
-							<Link2 className="text-[var(--accent-purple)] flex-shrink-0" size={24} />
-							<span className="text-base sm:text-xl font-semibold text-[var(--text-primary)] truncate">
-								Manage Links
-							</span>
-						</div>
-					</div>
-					<Button onClick={openCreateModal} size="sm" className="flex-shrink-0">
-						<Plus size={18} className="sm:mr-2" />
-						<span className="hidden sm:inline">Add Link</span>
-					</Button>
-				</div>
-			</motion.nav>
-
-			<div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
-				<motion.div
-					initial={{ opacity: 0, y: 20 }}
-					animate={{ opacity: 1, y: 0 }}
-					className="mb-8"
-				>
-					<h1 className="text-3xl mb-2 text-[var(--text-primary)] font-bold">
-						Your Links
+		<div className="max-w-3xl">
+			<motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between mb-8">
+				<div>
+					<h1 className="text-2xl font-black flex items-center gap-2 mb-1">
+						<FolderKanban size={22} className="text-[var(--accent-light)]" />
+						Projects
 					</h1>
-					<p className="text-[var(--text-secondary)]">
-						Click to edit • {links.length} active links
-					</p>
-				</motion.div>
+					<p className="text-[var(--text-muted)] text-sm">{links.length} project{links.length !== 1 ? "s" : ""}</p>
+				</div>
+				<button onClick={() => setAddOpen(!addOpen)} className="btn-primary text-sm px-5">
+					<Plus size={15} /> Add project
+				</button>
+			</motion.div>
 
+			{/* Add form */}
+			<AnimatePresence>
+				{addOpen && (
+					<motion.div
+						initial={{ opacity: 0, height: 0 }}
+						animate={{ opacity: 1, height: "auto" }}
+						exit={{ opacity: 0, height: 0 }}
+						className="overflow-hidden mb-6"
+					>
+						<div className="card p-6 space-y-3">
+							<h2 className="font-bold text-sm">New project</h2>
+							<div className="grid grid-cols-2 gap-3">
+								<input className="input" placeholder="Title *" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} />
+								<input className="input" placeholder="Live URL" value={addForm.url} onChange={e => setAddForm(f => ({ ...f, url: e.target.value }))} />
+							</div>
+							<div className="grid grid-cols-2 gap-3">
+								<input className="input" placeholder="GitHub URL" value={addForm.githubUrl} onChange={e => setAddForm(f => ({ ...f, githubUrl: e.target.value }))} />
+								<select className="input" value={addForm.role} onChange={e => setAddForm(f => ({ ...f, role: e.target.value }))}>
+									{ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+								</select>
+							</div>
+							<textarea className="input resize-none h-20" placeholder="Short description" value={addForm.description} onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))} />
+							<div className="flex justify-end gap-2">
+								<button onClick={() => setAddOpen(false)} className="btn-secondary text-sm px-4">Cancel</button>
+								<button onClick={handleAdd} disabled={adding} className="btn-primary text-sm px-6">
+									{adding ? <Loader2 size={14} className="animate-spin" /> : "Add project"}
+								</button>
+							</div>
+						</div>
+					</motion.div>
+				)}
+			</AnimatePresence>
+
+			{/* Project list */}
+			<div className="space-y-3">
 				<AnimatePresence>
-					{error && (
-						<motion.div
-							initial={{ opacity: 0, x: -20 }}
-							animate={{ opacity: 1, x: 0 }}
-							exit={{ opacity: 0, x: 20 }}
-							className="mb-4 px-4 py-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-500"
-						>
-							{error}
-						</motion.div>
-					)}
-				</AnimatePresence>
+					{links.map(link => {
+						const e = edits[link.id];
+						const isOpen = expanded === link.id;
+						const pg = perfGrade(link.lighthousePerformance);
 
-				<motion.div
-					initial={{ opacity: 0, y: 20 }}
-					animate={{ opacity: 1, y: 0 }}
-					transition={{ delay: 0.1 }}
-				>
-					<Card>
-						<CardContent className="p-6">
-							{links.length === 0 ? (
-								<div className="text-center py-12">
-									<Link2
-										className="mx-auto mb-4 text-[var(--text-secondary)]"
-										size={48}
-									/>
-									<h3 className="mb-2 text-[var(--text-primary)] font-semibold">
-										No links yet
-									</h3>
-									<p className="text-[var(--text-secondary)] mb-6">
-										Create your first link to get started
-									</p>
-									<Button onClick={openCreateModal}>
-										<Plus size={20} className="mr-2" />
-										Add Your First Link
-									</Button>
-								</div>
-							) : (
-								<div className="space-y-3">
-									{links.map((link, index) => (
-										<LinkItem
-											key={link._id}
-											link={link}
-											onEdit={openEditModal}
-											onDelete={handleDeleteClick}
-											index={index}
-										/>
-									))}
-								</div>
-							)}
-						</CardContent>
-					</Card>
-				</motion.div>
+						return (
+							<motion.div key={link.id} layout className="card overflow-hidden">
+								{/* Header */}
+								<button onClick={() => toggle(link.id)} className="w-full text-left p-4 flex items-center gap-3">
+									<span className="shrink-0">{statusIcon(link.status)}</span>
+									<span className="font-semibold flex-1 truncate">{link.title}</span>
+									<div className="flex items-center gap-2 shrink-0">
+										{pg && <span className={`badge font-mono text-xs ${pg.cls}`}>{pg.grade}</span>}
+										{link.githubStars != null && (
+											<span className="flex items-center gap-1 text-xs text-[var(--text-muted)]"><Star size={11} />{link.githubStars}</span>
+										)}
+										{isOpen ? <ChevronUp size={16} className="text-[var(--text-muted)]" /> : <ChevronDown size={16} className="text-[var(--text-muted)]" />}
+									</div>
+								</button>
+
+								{/* Expanded edit panel */}
+								<AnimatePresence>
+									{isOpen && e && (
+										<motion.div
+											initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
+											className="overflow-hidden border-t border-[var(--card-border)]"
+										>
+											<div className="p-5 space-y-4">
+												{/* Basic fields */}
+												<div className="grid grid-cols-2 gap-3">
+													<div>
+														<label className="text-xs text-[var(--text-muted)] mb-1 block">Title</label>
+														<input className="input" value={e.title} onChange={ev => setEdit(link.id, "title", ev.target.value)} />
+													</div>
+													<div>
+														<label className="text-xs text-[var(--text-muted)] mb-1 block">Role</label>
+														<select className="input" value={e.role} onChange={ev => setEdit(link.id, "role", ev.target.value)}>
+															{ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+														</select>
+													</div>
+												</div>
+												<div className="grid grid-cols-2 gap-3">
+													<div>
+														<label className="text-xs text-[var(--text-muted)] mb-1 block">Live URL</label>
+														<input className="input" value={e.url} onChange={ev => setEdit(link.id, "url", ev.target.value)} />
+													</div>
+													<div>
+														<label className="text-xs text-[var(--text-muted)] mb-1 block">GitHub URL</label>
+														<input className="input" value={e.githubUrl} onChange={ev => setEdit(link.id, "githubUrl", ev.target.value)} />
+													</div>
+												</div>
+												<div>
+													<label className="text-xs text-[var(--text-muted)] mb-1 block">Description</label>
+													<textarea className="input resize-none h-20" value={e.description} onChange={ev => setEdit(link.id, "description", ev.target.value)} />
+												</div>
+
+												{/* Tech stack */}
+												<div>
+													<label className="text-xs text-[var(--text-muted)] mb-1 block">Tech stack</label>
+													<div className="flex gap-2">
+														<input
+															className="input flex-1 text-sm"
+															placeholder="Add tech…"
+															value={techInput[link.id] ?? ""}
+															onChange={ev => setTechInput(t => ({ ...t, [link.id]: ev.target.value }))}
+															onKeyDown={ev => ev.key === "Enter" && addTech(link.id)}
+															list={`tech-${link.id}`}
+														/>
+														<datalist id={`tech-${link.id}`}>{TECH_SUGGESTIONS.map(t => <option key={t} value={t} />)}</datalist>
+														<button onClick={() => addTech(link.id)} className="btn-secondary text-xs px-3 shrink-0">Add</button>
+													</div>
+													<div className="flex flex-wrap gap-1.5 mt-2">
+														{e.techStack.map(t => (
+															<span
+																key={t}
+																onClick={() => setEdit(link.id, "techStack", e.techStack.filter(x => x !== t))}
+																className="badge cursor-pointer hover:bg-red-500/10 hover:text-red-400 text-xs"
+															>{t} ×</span>
+														))}
+													</div>
+												</div>
+
+												{/* Case study section */}
+												<div className="border-t border-[var(--card-border)] pt-4">
+													<h3 className="font-bold text-sm mb-3 text-[var(--accent-light)]">Case Study</h3>
+													<div className="space-y-3">
+														<div>
+															<label className="text-xs text-[var(--text-muted)] mb-1 block">Problem statement</label>
+															<textarea className="input resize-none h-20 text-sm" value={e.problemStatement} onChange={ev => setEdit(link.id, "problemStatement", ev.target.value)} placeholder="What problem were you solving?" />
+														</div>
+														<div className="grid grid-cols-2 gap-3">
+															<div>
+																<label className="text-xs text-[var(--text-muted)] mb-1 block">Outcome metric</label>
+																<input className="input text-sm" value={e.outcomeMetric} onChange={ev => setEdit(link.id, "outcomeMetric", ev.target.value)} placeholder="e.g. 40% faster load" />
+															</div>
+															<div>
+																<label className="text-xs text-[var(--text-muted)] mb-1 block">Team size</label>
+																<input className="input text-sm" type="number" value={e.teamSize} onChange={ev => setEdit(link.id, "teamSize", ev.target.value)} placeholder="2" />
+															</div>
+														</div>
+														<div>
+															<label className="text-xs text-[var(--text-muted)] mb-1 block">Outcome summary</label>
+															<textarea className="input resize-none h-16 text-sm" value={e.outcomeSummary} onChange={ev => setEdit(link.id, "outcomeSummary", ev.target.value)} placeholder="What was the result?" />
+														</div>
+														<div className="grid grid-cols-2 gap-3">
+															<div>
+																<label className="text-xs text-[var(--text-muted)] mb-1 block">Client name</label>
+																<input className="input text-sm" value={e.clientName} onChange={ev => setEdit(link.id, "clientName", ev.target.value)} />
+															</div>
+															<div>
+																<label className="text-xs text-[var(--text-muted)] mb-1 block">Client company</label>
+																<input className="input text-sm" value={e.clientCompany} onChange={ev => setEdit(link.id, "clientCompany", ev.target.value)} />
+															</div>
+														</div>
+														<div>
+															<label className="text-xs text-[var(--text-muted)] mb-1 block">My contribution</label>
+															<textarea className="input resize-none h-16 text-sm" value={e.myContribution} onChange={ev => setEdit(link.id, "myContribution", ev.target.value)} placeholder="What did you specifically build?" />
+														</div>
+														<div>
+															<label className="text-xs text-[var(--text-muted)] mb-1 block">Video walkthrough URL</label>
+															<input className="input text-sm" value={e.walkthroughUrl} onChange={ev => setEdit(link.id, "walkthroughUrl", ev.target.value)} placeholder="https://loom.com/share/…" />
+														</div>
+														<div>
+															<label className="text-xs text-[var(--text-muted)] mb-1 block">Full case study body</label>
+															<textarea className="input resize-none h-32 text-sm" value={e.caseStudyBody} onChange={ev => setEdit(link.id, "caseStudyBody", ev.target.value)} placeholder="Full narrative (markdown supported)…" />
+														</div>
+													</div>
+												</div>
+
+												{/* Actions */}
+												<div className="flex items-center justify-between pt-2">
+													<div className="flex gap-2">
+														{link.url && (
+															<a href={link.url} target="_blank" rel="noopener" className="btn-secondary text-xs px-3 py-2">
+																<ExternalLink size={12} />
+															</a>
+														)}
+														<button
+															onClick={() => handleValidate(link.id)}
+															disabled={!link.url || validating === link.id}
+															className="btn-secondary text-xs px-3 py-2 flex items-center gap-1"
+														>
+															{validating === link.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+															Check
+														</button>
+													</div>
+													<div className="flex gap-2">
+														<button
+															onClick={() => handleDelete(link.id)}
+															disabled={deleting === link.id}
+															className="btn-secondary text-xs px-3 py-2 text-red-400 border-red-500/20 hover:bg-red-500/10"
+														>
+															{deleting === link.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+														</button>
+														<button
+															onClick={() => handleSave(link.id)}
+															disabled={saving === link.id}
+															className="btn-primary text-xs px-5 py-2"
+														>
+															{saving === link.id ? <Loader2 size={12} className="animate-spin" /> : <><Save size={12} /> Save</>}
+														</button>
+													</div>
+												</div>
+											</div>
+										</motion.div>
+									)}
+								</AnimatePresence>
+							</motion.div>
+						);
+					})}
+				</AnimatePresence>
 			</div>
 
-			{/* GitHub URL Input Modal */}
-			<AnimatePresence>
-				{showGitHubModal && (
-					<motion.div
-						initial={{ opacity: 0 }}
-						animate={{ opacity: 1 }}
-						exit={{ opacity: 0 }}
-						className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-						onClick={() => {
-							setShowGitHubModal(false);
-							setGithubUrlInput("");
-							setError("");
-						}}
-					>
-						<motion.div
-							initial={{ opacity: 0, scale: 0.9, y: 20 }}
-							animate={{ opacity: 1, scale: 1, y: 0 }}
-							exit={{ opacity: 0, scale: 0.9, y: 20 }}
-							onClick={(e) => e.stopPropagation()}
-							className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4 sm:p-6 max-w-md w-full shadow-2xl"
-						>
-							<div className="flex items-center justify-between mb-6">
-								<h2 className="text-2xl font-bold text-[var(--text-primary)]">
-									Connect GitHub Repository
-								</h2>
-								<button
-									onClick={() => {
-										setShowGitHubModal(false);
-										setGithubUrlInput("");
-										setError("");
-									}}
-									className="text-[var(--text-secondary)] hover:text-[var(--accent-purple)] transition-colors"
-								>
-									<X size={24} />
-								</button>
-							</div>
-
-							<div className="space-y-4">
-								<Input
-									type="url"
-									label="GitHub Repository URL"
-									placeholder="https://github.com/username/repo"
-									value={githubUrlInput}
-									onChange={(e) => setGithubUrlInput(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") {
-											handleFetchGitHub();
-										}
-									}}
-								/>
-
-								<AnimatePresence>
-									{error && (
-										<motion.div
-											initial={{ opacity: 0, y: -10 }}
-											animate={{ opacity: 1, y: 0 }}
-											exit={{ opacity: 0, y: -10 }}
-											className="px-4 py-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-500 text-sm"
-										>
-											{error}
-										</motion.div>
-									)}
-								</AnimatePresence>
-
-								<div className="flex gap-3 pt-4">
-									<Button
-										type="button"
-										onClick={handleFetchGitHub}
-										disabled={isFetchingGitHub || !githubUrlInput.trim()}
-										className="flex-1"
-									>
-										{isFetchingGitHub ? "Fetching..." : "Fetch from GitHub"}
-									</Button>
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => {
-											setShowGitHubModal(false);
-											setGithubUrlInput("");
-											setError("");
-										}}
-										className="flex-1"
-									>
-										Cancel
-									</Button>
-								</div>
-							</div>
-						</motion.div>
-					</motion.div>
-				)}
-			</AnimatePresence>
-
-			{/* Confirmation Modal (Read-only with Edit option) */}
-			<AnimatePresence>
-				{showConfirmModal && fetchedData && (
-					<motion.div
-						initial={{ opacity: 0 }}
-						animate={{ opacity: 1 }}
-						exit={{ opacity: 0 }}
-						className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-						onClick={() => {
-							setShowConfirmModal(false);
-							setFetchedData(null);
-							setError(""); // Clear error when closing
-						}}
-					>
-						<motion.div
-							initial={{ opacity: 0, scale: 0.9, y: 20 }}
-							animate={{ opacity: 1, scale: 1, y: 0 }}
-							exit={{ opacity: 0, scale: 0.9, y: 20 }}
-							onClick={(e) => e.stopPropagation()}
-							className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4 sm:p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto"
-						>
-							<div className="flex items-center justify-between mb-6">
-								<h2 className="text-2xl font-bold text-[var(--text-primary)]">
-									Confirm Project Details
-								</h2>
-								<button
-									onClick={() => {
-										setShowConfirmModal(false);
-										setFetchedData(null);
-										setError(""); // Clear error when closing
-									}}
-									className="text-[var(--text-secondary)] hover:text-[var(--accent-purple)] transition-colors"
-								>
-									<X size={24} />
-								</button>
-							</div>
-
-							<div className="space-y-4">
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Project Name
-									</label>
-									<div className="px-4 py-3 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-primary)]">
-										{fetchedData.title}
-									</div>
-								</div>
-
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Description
-									</label>
-									<div className="px-4 py-3 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-primary)] min-h-[60px]">
-										{fetchedData.description || "No description"}
-									</div>
-								</div>
-
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Tech Stack
-									</label>
-									<div className="px-4 py-3 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)]">
-										<div className="flex flex-wrap gap-2">
-											{fetchedData.techStack && fetchedData.techStack.length > 0 ? (
-												fetchedData.techStack.map((tech: string, idx: number) => (
-													<span
-														key={idx}
-														className="px-2 py-1 text-xs bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] rounded-md"
-													>
-														{tech}
-													</span>
-												))
-											) : (
-												<span className="text-[var(--text-secondary)] text-sm">No tech stack</span>
-											)}
-										</div>
-									</div>
-								</div>
-
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Role
-									</label>
-									<div className="px-4 py-3 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-primary)]">
-										{fetchedData.role || "Full Stack"}
-									</div>
-								</div>
-
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										GitHub URL
-									</label>
-									<div className="px-4 py-3 rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-primary)]">
-										<a
-											href={fetchedData.githubUrl}
-											target="_blank"
-											rel="noopener noreferrer"
-											className="text-[var(--accent-purple)] hover:underline"
-										>
-											{fetchedData.githubUrl}
-										</a>
-									</div>
-								</div>
-
-								<div>
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Hosted URL (Optional)
-									</label>
-									<input
-										type="text"
-										placeholder="https://example.com"
-										value={confirmHostedUrl}
-										onChange={(e) => {
-											setConfirmHostedUrl(e.target.value);
-											setError(""); // Clear error when user types
-										}}
-										className="flex h-11 w-full rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-purple)] focus-visible:border-transparent"
-									/>
-									<p className="text-xs text-[var(--text-secondary)] mt-2">
-										The live/deployed URL of your project - Leave empty if not deployed yet
-									</p>
-								</div>
-
-								<AnimatePresence>
-									{error && (
-										<motion.div
-											initial={{ opacity: 0, y: -10 }}
-											animate={{ opacity: 1, y: 0 }}
-											exit={{ opacity: 0, y: -10 }}
-											className="px-4 py-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-500 text-sm"
-										>
-											{error}
-										</motion.div>
-									)}
-								</AnimatePresence>
-
-								<div className="flex gap-3 pt-4">
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => {
-											setShowConfirmModal(false);
-											setIsModalOpen(true);
-											reset({
-												title: fetchedData.title,
-												url: confirmHostedUrl || "",
-												description: fetchedData.description || "",
-												techStack: fetchedData.techStack || [],
-												role: fetchedData.role || "Full Stack",
-												githubUrl: fetchedData.githubUrl || "",
-											});
-											setTechStackInput(fetchedData.techStack?.join(", ") || "");
-										}}
-										className="flex-1"
-									>
-										Edit
-									</Button>
-									<Button
-										type="button"
-										onClick={handleConfirmProject}
-										className="flex-1"
-									>
-										Confirm
-									</Button>
-								</div>
-							</div>
-						</motion.div>
-					</motion.div>
-				)}
-			</AnimatePresence>
-
-			{/* Add/Edit Modal (for editing existing links) */}
-			<AnimatePresence>
-				{isModalOpen && (
-					<motion.div
-						initial={{ opacity: 0 }}
-						animate={{ opacity: 1 }}
-						exit={{ opacity: 0 }}
-						className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-						onClick={() => setIsModalOpen(false)}
-					>
-						<motion.div
-							initial={{ opacity: 0, scale: 0.9, y: 20 }}
-							animate={{ opacity: 1, scale: 1, y: 0 }}
-							exit={{ opacity: 0, scale: 0.9, y: 20 }}
-							onClick={(e) => e.stopPropagation()}
-							className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-2xl p-4 sm:p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto"
-						>
-							<div className="flex items-center justify-between mb-6">
-								<h2 className="text-2xl font-bold text-[var(--text-primary)]">
-									{editingLink ? "Edit Link" : "Add New Link"}
-								</h2>
-								<button
-									onClick={() => setIsModalOpen(false)}
-									className="text-[var(--text-secondary)] hover:text-[var(--accent-purple)] transition-colors"
-								>
-									<X size={24} />
-								</button>
-							</div>
-
-							<form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-								<div className="w-full p-4 bg-[var(--bg-secondary)] rounded-xl border border-[var(--card-border)]">
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										GitHub Repository (Optional)
-									</label>
-									<div className="flex gap-2">
-										<Input
-											type="url"
-											placeholder="https://github.com/username/repo"
-											value={githubUrlInput}
-											onChange={(e) => setGithubUrlInput(e.target.value)}
-											className="flex-1"
-										/>
-										<Button
-											type="button"
-											onClick={async () => {
-												if (!githubUrlInput.trim()) {
-													setError("Please enter a GitHub URL");
-													return;
-												}
-												
-												setIsFetchingGitHub(true);
-												setError("");
-												
-												try {
-													const response = await githubApi.fetch(
-														githubUrlInput.trim(),
-														session!.accessToken as string
-													);
-													
-													if (response.success) {
-														const data = response.data;
-														// Auto-populate form fields
-														setValue("title", data.title);
-														setValue("description", data.description || "");
-														setValue("techStack", data.techStack);
-														setValue("role", data.role);
-														setValue("githubUrl", data.githubUrl);
-														setTechStackInput(data.techStack.join(", "));
-													}
-												} catch (err: any) {
-													setError(err.message || "Failed to fetch GitHub repository");
-												} finally {
-													setIsFetchingGitHub(false);
-												}
-											}}
-											disabled={isFetchingGitHub}
-											className="flex-shrink-0"
-										>
-											{isFetchingGitHub ? "Fetching..." : "Fetch from GitHub"}
-										</Button>
-									</div>
-									<p className="mt-2 text-xs text-[var(--text-secondary)]">
-										Enter GitHub repo URL to auto-populate project details
-									</p>
-								</div>
-
-								<Input
-									{...register("title")}
-									type="text"
-									label="Title"
-									placeholder="My Awesome Link"
-									error={errors.title?.message}
-								/>
-
-								<Input
-									{...register("url")}
-									type="url"
-									label="Hosted URL (Optional)"
-									placeholder="https://.com"
-									error={errors.url?.message}
-								/>
-								<p className="text-xs text-[var(--text-secondary)] -mt-2 mb-2">
-									The live/deployed URL of your project - Leave empty if not deployed yet
-								</p>
-
-								<Textarea
-									{...register("description")}
-									label="Description (Optional)"
-									placeholder="Brief description of this link..."
-									rows={3}
-								/>
-
-								<div className="w-full">
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Tech Stack (Optional) - Comma separated
-									</label>
-									<Input
-										type="text"
-										placeholder="React, Node.js, PostgreSQL (comma separated)"
-										value={techStackInput}
-										onChange={(e) => setTechStackInput(e.target.value)}
-									/>
-								</div>
-
-								<div className="w-full">
-									<label className="block mb-2 text-[var(--text-secondary)] font-medium text-sm">
-										Role
-									</label>
-									<select
-										{...register("role")}
-										className="flex h-11 w-full rounded-xl border border-[var(--input-border)] bg-[var(--input-bg)] px-4 py-3 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-purple)] focus-visible:border-transparent"
-									>
-										<option value="Full Stack">Full Stack</option>
-										<option value="Frontend">Frontend</option>
-										<option value="Backend">Backend</option>
-									</select>
-									{errors.role && (
-										<p className="mt-1 text-sm text-red-500">
-											{errors.role.message}
-										</p>
-									)}
-								</div>
-
-								<Input
-									type="url"
-									label="GitHub URL (Optional)"
-									placeholder="https://github.com/username/repo"
-									value={githubUrlInput}
-									onChange={(e) => {
-										setGithubUrlInput(e.target.value);
-										setValue("githubUrl", e.target.value);
-									}}
-									error={errors.githubUrl?.message}
-								/>
-
-								<div className="flex gap-3 pt-4">
-									<Button type="submit" className="flex-1">
-										{editingLink ? "Update Link" : "Add Link"}
-									</Button>
-									<Button
-										type="button"
-										variant="outline"
-										onClick={() => setIsModalOpen(false)}
-										className="flex-1"
-									>
-										Cancel
-									</Button>
-								</div>
-							</form>
-						</motion.div>
-					</motion.div>
-				)}
-			</AnimatePresence>
-
-			<Modal open={showMissingUrlModal} onOpenChange={setShowMissingUrlModal}>
-				<ModalContent>
-					<ModalHeader>
-						<div className="flex items-center gap-3">
-							<AlertTriangle className="w-6 h-6 text-amber-500" />
-							<ModalTitle>No Hosted URL Provided</ModalTitle>
-						</div>
-					</ModalHeader>
-					<div className="px-6 pb-6 pt-2">
-						<p className="text-base text-[var(--text-primary)] mb-3">
-							A live hosted URL is a blessing for recruiters to see the best proof of your work. 
-							It demonstrates your ability to deploy and maintain real applications.
-						</p>
-						<p className="text-sm text-[var(--text-secondary)]">
-							Do you want to continue without a hosted URL?
-						</p>
-					</div>
-					<ModalFooter>
-						<Button
-							variant="outline"
-							onClick={() => setShowMissingUrlModal(false)}
-						>
-							Cancel
-						</Button>
-						<Button
-							onClick={async () => {
-								setShowMissingUrlModal(false);
-								await saveProject(session!.accessToken as string);
-							}}
-						>
-							Continue Without URL
-						</Button>
-					</ModalFooter>
-				</ModalContent>
-			</Modal>
-
-			<Modal open={showDeleteModal} onOpenChange={setShowDeleteModal}>
-				<ModalContent>
-					<ModalHeader>
-						<div className="flex items-center gap-3">
-							<AlertTriangle className="w-6 h-6 text-red-500" />
-							<ModalTitle>Delete Project</ModalTitle>
-						</div>
-					</ModalHeader>
-					<div className="px-6 pb-6 pt-2">
-						<p className="text-base text-[var(--text-primary)]">
-							Are you sure you want to delete this project? This action cannot be undone.
-						</p>
-					</div>
-					<ModalFooter>
-						<Button
-							variant="outline"
-							onClick={() => {
-								setShowDeleteModal(false);
-								setLinkToDelete(null);
-							}}
-						>
-							Cancel
-						</Button>
-						<Button
-							onClick={handleDeleteConfirm}
-							className="bg-red-600 hover:bg-red-700 text-white"
-						>
-							Delete
-						</Button>
-					</ModalFooter>
-				</ModalContent>
-			</Modal>
+			{links.length === 0 && (
+				<div className="card p-12 text-center text-[var(--text-muted)]">
+					<FolderKanban size={32} className="mx-auto mb-3 opacity-30" />
+					No projects yet. Add your first one above.
+				</div>
+			)}
 		</div>
 	);
 }

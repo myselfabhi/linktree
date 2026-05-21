@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import Profile from "../models/Profile.js";
-import User from "../models/User.js";
+import { Prisma, AvailabilityStatus } from "@prisma/client";
+import { prisma } from "../config/db.js";
 
 interface CreateProfileBody {
 	username: string;
@@ -21,9 +21,27 @@ interface UpdateProfileBody {
 	colors?: Record<string, unknown>;
 	font?: string;
 	backgroundImage?: string;
+	// Hire-me panel
+	headline?: string;
+	location?: string;
+	timezone?: string;
+	availabilityStatus?: AvailabilityStatus;
+	availableFrom?: string | null;
+	hourlyRateMin?: number | null;
+	hourlyRateMax?: number | null;
+	projectRateMin?: number | null;
+	projectRateMax?: number | null;
+	currency?: string;
+	calendlyUrl?: string | null;
+	contactEmail?: string | null;
+	servicesOffered?: string[];
+	// Socials
+	twitterUrl?: string | null;
+	linkedinUrl?: string | null;
+	githubUrl?: string | null;
+	websiteUrl?: string | null;
 }
 
-// Username validation regex: lowercase letters, numbers, hyphens, underscores
 const USERNAME_REGEX = /^[a-z0-9_-]+$/;
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 30;
@@ -48,15 +66,11 @@ export const createProfile = async (
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
 		const { username, displayName, bio, avatar, font, backgroundImage, colors } = req.body;
 
-		// Validation
 		if (!username || !displayName) {
 			return res.status(400).json({
 				success: false,
@@ -64,17 +78,13 @@ export const createProfile = async (
 			});
 		}
 
-		// Validate username format
-		const usernameError = validateUsername(username.toLowerCase());
+		const normalizedUsername = username.toLowerCase();
+		const usernameError = validateUsername(normalizedUsername);
 		if (usernameError) {
-			return res.status(400).json({
-				success: false,
-				message: usernameError,
-			});
+			return res.status(400).json({ success: false, message: usernameError });
 		}
 
-		// Check if user already has a profile
-		const existingProfile = await Profile.findOne({ userId });
+		const existingProfile = await prisma.profile.findUnique({ where: { userId } });
 		if (existingProfile) {
 			return res.status(409).json({
 				success: false,
@@ -82,9 +92,8 @@ export const createProfile = async (
 			});
 		}
 
-		// Check if username is taken
-		const usernameTaken = await Profile.findOne({
-			username: username.toLowerCase(),
+		const usernameTaken = await prisma.profile.findUnique({
+			where: { username: normalizedUsername },
 		});
 		if (usernameTaken) {
 			return res.status(409).json({
@@ -93,19 +102,18 @@ export const createProfile = async (
 			});
 		}
 
-		// Create profile
-		const profile = new Profile({
-			userId,
-			username: username.toLowerCase(),
-			displayName: displayName.trim(),
-			bio: bio?.trim(),
-			avatar,
-			font: font?.trim() || undefined,
-			backgroundImage,
-			colors,
+		const profile = await prisma.profile.create({
+			data: {
+				userId,
+				username: normalizedUsername,
+				displayName: displayName.trim(),
+				bio: bio?.trim() || null,
+				avatar: avatar || null,
+				font: font?.trim() || null,
+				backgroundImage: backgroundImage || null,
+				colors: (colors ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull,
+			},
 		});
-
-		await profile.save();
 
 		res.status(201).json({
 			success: true,
@@ -113,11 +121,14 @@ export const createProfile = async (
 			data: { profile },
 		});
 	} catch (error) {
+		if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+			return res.status(409).json({
+				success: false,
+				message: "Username is already taken",
+			});
+		}
 		console.error("Create profile error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -125,31 +136,25 @@ export const getProfile = async (req: Request, res: Response) => {
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
-		const profile = await Profile.findOne({ userId }).populate("userId", "email name");
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			include: { user: { select: { email: true, name: true } } },
+		});
 
-		// Return 200 with null profile for new users (expected state)
-		// This prevents 404 errors in frontend for users who haven't created a profile yet
 		res.status(200).json({
 			success: true,
-			data: { 
-				profile: profile ? {
-					...profile.toObject(),
-					views: profile.views || 0,
-				} : null 
+			data: {
+				profile: profile
+					? { ...profile, views: profile.views ?? 0 }
+					: null,
 			},
 		});
 	} catch (error) {
 		console.error("Get profile error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -160,37 +165,36 @@ export const updateProfile = async (
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
-		const profile = await Profile.findOne({ userId });
-		if (!profile) {
+		const existing = await prisma.profile.findUnique({ where: { userId } });
+		if (!existing) {
 			return res.status(404).json({
 				success: false,
 				message: "Profile not found. Create a profile first.",
 			});
 		}
 
-		const { username, displayName, bio, avatar, theme, colors, font, backgroundImage } =
-			req.body;
+		const {
+			username, displayName, bio, avatar, theme, colors, font, backgroundImage,
+			headline, location, timezone, availabilityStatus, availableFrom,
+			hourlyRateMin, hourlyRateMax, projectRateMin, projectRateMax,
+			currency, calendlyUrl, contactEmail, servicesOffered,
+			twitterUrl, linkedinUrl, githubUrl, websiteUrl,
+		} = req.body;
 
-		// If username is being updated, validate and check uniqueness
+		const data: Prisma.ProfileUpdateInput = {};
+
 		if (username) {
-			const usernameError = validateUsername(username.toLowerCase());
+			const normalizedUsername = username.toLowerCase();
+			const usernameError = validateUsername(normalizedUsername);
 			if (usernameError) {
-				return res.status(400).json({
-					success: false,
-					message: usernameError,
-				});
+				return res.status(400).json({ success: false, message: usernameError });
 			}
 
-			// Check if new username is taken by another user
-			const usernameTaken = await Profile.findOne({
-				username: username.toLowerCase(),
-				userId: { $ne: userId },
+			const usernameTaken = await prisma.profile.findFirst({
+				where: { username: normalizedUsername, NOT: { userId } },
 			});
 			if (usernameTaken) {
 				return res.status(409).json({
@@ -198,34 +202,42 @@ export const updateProfile = async (
 					message: "Username is already taken",
 				});
 			}
-
-			profile.username = username.toLowerCase();
+			data.username = normalizedUsername;
 		}
 
-		// Update fields
-		if (displayName !== undefined) {
-			profile.displayName = displayName.trim();
-		}
-		if (bio !== undefined) {
-			profile.bio = bio.trim() || undefined;
-		}
-		if (avatar !== undefined) {
-			profile.avatar = avatar || undefined;
-		}
-		if (theme !== undefined) {
-			profile.theme = theme;
-		}
-		if (colors !== undefined) {
-			profile.colors = colors;
-		}
-		if (font !== undefined) {
-			profile.font = font;
-		}
-		if (backgroundImage !== undefined) {
-			profile.backgroundImage = backgroundImage || undefined;
-		}
+		if (displayName !== undefined) data.displayName = displayName.trim();
+		if (bio !== undefined) data.bio = bio.trim() || null;
+		if (avatar !== undefined) data.avatar = avatar || null;
+		if (theme !== undefined) data.theme = (theme ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull;
+		if (colors !== undefined) data.colors = (colors ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull;
+		if (font !== undefined) data.font = font || null;
+		if (backgroundImage !== undefined) data.backgroundImage = backgroundImage || null;
 
-		await profile.save();
+		// Hire-me panel
+		if (headline !== undefined) data.headline = headline?.trim() || null;
+		if (location !== undefined) data.location = location?.trim() || null;
+		if (timezone !== undefined) data.timezone = timezone?.trim() || null;
+		if (availabilityStatus !== undefined) data.availabilityStatus = availabilityStatus;
+		if (availableFrom !== undefined) data.availableFrom = availableFrom ? new Date(availableFrom) : null;
+		if (hourlyRateMin !== undefined) data.hourlyRateMin = hourlyRateMin ?? null;
+		if (hourlyRateMax !== undefined) data.hourlyRateMax = hourlyRateMax ?? null;
+		if (projectRateMin !== undefined) data.projectRateMin = projectRateMin ?? null;
+		if (projectRateMax !== undefined) data.projectRateMax = projectRateMax ?? null;
+		if (currency !== undefined) data.currency = currency || "USD";
+		if (calendlyUrl !== undefined) data.calendlyUrl = calendlyUrl || null;
+		if (contactEmail !== undefined) data.contactEmail = contactEmail || null;
+		if (servicesOffered !== undefined) data.servicesOffered = servicesOffered;
+
+		// Socials
+		if (twitterUrl !== undefined) data.twitterUrl = twitterUrl || null;
+		if (linkedinUrl !== undefined) data.linkedinUrl = linkedinUrl || null;
+		if (githubUrl !== undefined) data.githubUrl = githubUrl || null;
+		if (websiteUrl !== undefined) data.websiteUrl = websiteUrl || null;
+
+		const profile = await prisma.profile.update({
+			where: { userId },
+			data,
+		});
 
 		res.status(200).json({
 			success: true,
@@ -233,11 +245,14 @@ export const updateProfile = async (
 			data: { profile },
 		});
 	} catch (error) {
+		if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+			return res.status(409).json({
+				success: false,
+				message: "Username is already taken",
+			});
+		}
 		console.error("Update profile error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -246,29 +261,22 @@ export const getPublicProfile = async (req: Request, res: Response) => {
 		const { username } = req.params;
 
 		if (!username) {
-			return res.status(400).json({
-				success: false,
-				message: "Username is required",
-			});
+			return res.status(400).json({ success: false, message: "Username is required" });
 		}
 
-		const profile = await Profile.findOne({
-			username: username.toLowerCase(),
-		}).populate("userId", "name email");
+		const profile = await prisma.profile.findUnique({
+			where: { username: username.toLowerCase() },
+		});
 
 		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
-			});
+			return res.status(404).json({ success: false, message: "Profile not found" });
 		}
 
-		// Return public profile data (exclude sensitive info)
 		res.status(200).json({
 			success: true,
 			data: {
 				profile: {
-					id: profile._id,
+					id: profile.id,
 					username: profile.username,
 					displayName: profile.displayName,
 					bio: profile.bio,
@@ -277,17 +285,33 @@ export const getPublicProfile = async (req: Request, res: Response) => {
 					colors: profile.colors,
 					font: profile.font,
 					backgroundImage: profile.backgroundImage,
-					views: profile.views || 0,
+					views: profile.views ?? 0,
 					createdAt: profile.createdAt,
+					// Hire-me
+					headline: profile.headline,
+					location: profile.location,
+					timezone: profile.timezone,
+					availabilityStatus: profile.availabilityStatus,
+					availableFrom: profile.availableFrom,
+					hourlyRateMin: profile.hourlyRateMin,
+					hourlyRateMax: profile.hourlyRateMax,
+					projectRateMin: profile.projectRateMin,
+					projectRateMax: profile.projectRateMax,
+					currency: profile.currency,
+					calendlyUrl: profile.calendlyUrl,
+					contactEmail: profile.contactEmail,
+					servicesOffered: profile.servicesOffered,
+					// Socials
+					twitterUrl: profile.twitterUrl,
+					linkedinUrl: profile.linkedinUrl,
+					githubUrl: profile.githubUrl,
+					websiteUrl: profile.websiteUrl,
 				},
 			},
 		});
 	} catch (error) {
 		console.error("Get public profile error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -296,14 +320,11 @@ export const checkUsernameAvailability = async (req: Request, res: Response) => 
 		const { username } = req.query;
 
 		if (!username || typeof username !== "string") {
-			return res.status(400).json({
-				success: false,
-				message: "Username is required",
-			});
+			return res.status(400).json({ success: false, message: "Username is required" });
 		}
 
-		// Validate username format
-		const usernameError = validateUsername(username.toLowerCase());
+		const normalizedUsername = username.toLowerCase();
+		const usernameError = validateUsername(normalizedUsername);
 		if (usernameError) {
 			return res.status(400).json({
 				success: false,
@@ -312,24 +333,18 @@ export const checkUsernameAvailability = async (req: Request, res: Response) => 
 			});
 		}
 
-		// Check if username is taken
-		const existing = await Profile.findOne({
-			username: username.toLowerCase(),
+		const existing = await prisma.profile.findUnique({
+			where: { username: normalizedUsername },
+			select: { id: true },
 		});
 
 		res.status(200).json({
 			success: true,
-			data: {
-				username: username.toLowerCase(),
-				available: !existing,
-			},
+			data: { username: normalizedUsername, available: !existing },
 		});
 	} catch (error) {
 		console.error("Check username availability error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -338,42 +353,24 @@ export const trackProfileView = async (req: Request, res: Response) => {
 		const { username } = req.params;
 
 		if (!username) {
-			return res.status(400).json({
-				success: false,
-				message: "Username is required",
-			});
+			return res.status(400).json({ success: false, message: "Username is required" });
 		}
 
-		// Find profile by username and increment views
-		const profile = await Profile.findOne({
-			username: username.toLowerCase(),
-		});
-
-		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
+		try {
+			const profile = await prisma.profile.update({
+				where: { username: username.toLowerCase() },
+				data: { views: { increment: 1 } },
+				select: { views: true },
 			});
+			res.status(200).json({ success: true, data: { views: profile.views } });
+		} catch (e) {
+			if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+				return res.status(404).json({ success: false, message: "Profile not found" });
+			}
+			throw e;
 		}
-
-		// Increment view count
-		profile.views = (profile.views || 0) + 1;
-		await profile.save();
-
-		res.status(200).json({
-			success: true,
-			data: {
-				views: profile.views,
-			},
-		});
 	} catch (error) {
 		console.error("Track profile view error:", error);
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
-
-
-

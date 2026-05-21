@@ -1,59 +1,27 @@
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-
-// Load environment variables
-dotenv.config();
-
-interface MongooseCache {
-	conn: typeof mongoose | null;
-	promise: Promise<typeof mongoose> | null;
-}
+import { PrismaClient } from "@prisma/client";
+import { logger } from "../utils/logger.js";
 
 declare global {
 	// eslint-disable-next-line no-var
-	var mongoose: MongooseCache | undefined;
+	var __prisma: PrismaClient | undefined;
 }
 
-let cached: MongooseCache = global.mongoose || { conn: null, promise: null };
+export const prisma =
+	global.__prisma ??
+	new PrismaClient({
+		log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+	});
 
-if (!global.mongoose) {
-	global.mongoose = cached;
+if (process.env.NODE_ENV !== "production") {
+	global.__prisma = prisma;
 }
 
-async function connectDB(): Promise<typeof mongoose> {
-	const MONGODB_URI = process.env.MONGODB_URI;
-
-	if (!MONGODB_URI) {
-		throw new Error("Please define MONGODB_URI in your .env file");
+async function connectDB(): Promise<void> {
+	if (!process.env.DATABASE_URL) {
+		throw new Error("Please define DATABASE_URL in your .env file");
 	}
-
-	if (cached.conn) {
-		return cached.conn;
-	}
-
-	if (!cached.promise) {
-		const opts = {
-			bufferCommands: false,
-		};
-
-		cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-			console.log("✅ MongoDB connected");
-			return mongoose;
-		});
-	}
-
-	try {
-		cached.conn = await cached.promise;
-	} catch (e) {
-		cached.promise = null;
-		throw e;
-	}
-
-	return cached.conn;
+	await prisma.$connect();
+	logger.info("Connected to PostgreSQL");
 }
 
 export default connectDB;
-
-
-
-

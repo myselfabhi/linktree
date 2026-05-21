@@ -7,6 +7,9 @@ import {
 	checkUsernameAvailability,
 	trackProfileView,
 } from "../controllers/profileController.js";
+import { submitBrief } from "../controllers/briefController.js";
+import { trackView } from "../controllers/engagementController.js";
+import { getPublicTestimonials } from "../controllers/testimonialController.js";
 import { authenticate } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -20,8 +23,10 @@ router.get("/", authenticate, getProfile);
 router.put("/", authenticate, updateProfile);
 
 // Public routes with parameters (must come last to avoid catching protected routes)
-// More specific routes must come before less specific ones
 router.get("/track/:username", trackProfileView);
+router.post("/:username/view", trackView);
+router.post("/:username/brief", submitBrief);
+router.get("/:username/testimonials", getPublicTestimonials);
 router.get("/:username", getPublicProfile);
 
 export default router;

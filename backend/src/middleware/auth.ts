@@ -17,6 +17,22 @@ declare global {
 	}
 }
 
+export const optionalAuthenticate = (req: Request, _res: Response, next: NextFunction) => {
+	try {
+		const authHeader = req.headers.authorization;
+		if (authHeader) {
+			const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+			if (token) {
+				const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+				req.userId = decoded.userId;
+			}
+		}
+	} catch {
+		// silently ignore — optional auth
+	}
+	next();
+};
+
 export const authenticate = (
 	req: Request,
 	res: Response,

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import Link from "../models/Link.js";
-import Profile from "../models/Profile.js";
+import { Prisma, LinkRole, LinkStatus } from "@prisma/client";
+import { prisma } from "../config/db.js";
 import { validateUrl } from "../services/urlValidationService.js";
 import { captureScreenshot } from "../services/screenshotService.js";
 import { fetchGitHubMetrics } from "../services/githubMetricsService.js";
@@ -23,6 +23,16 @@ interface UpdateLinkBody {
 	techStack?: string[];
 	role?: "Frontend" | "Backend" | "Full Stack";
 	githubUrl?: string;
+	// Case study
+	problemStatement?: string | null;
+	outcomeSummary?: string | null;
+	outcomeMetric?: string | null;
+	clientName?: string | null;
+	clientCompany?: string | null;
+	teamSize?: number | null;
+	myContribution?: string | null;
+	walkthroughUrl?: string | null;
+	caseStudyBody?: string | null;
 }
 
 const isValidUrl = (url: string): boolean => {
@@ -34,6 +44,25 @@ const isValidUrl = (url: string): boolean => {
 	}
 };
 
+const roleToEnum = (role?: string): LinkRole => {
+	switch (role) {
+		case "Frontend":
+			return LinkRole.Frontend;
+		case "Backend":
+			return LinkRole.Backend;
+		default:
+			return LinkRole.FullStack;
+	}
+};
+
+const roleToString = (role: LinkRole): "Frontend" | "Backend" | "Full Stack" =>
+	role === LinkRole.Frontend ? "Frontend" : role === LinkRole.Backend ? "Backend" : "Full Stack";
+
+const formatLink = <T extends { role: LinkRole }>(link: T) => ({
+	...link,
+	role: roleToString(link.role),
+});
+
 export const createLink = async (
 	req: Request<{}, {}, CreateLinkBody>,
 	res: Response
@@ -41,19 +70,13 @@ export const createLink = async (
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
 		const { title, url, description, techStack, role, githubUrl } = req.body;
 
 		if (!title) {
-			return res.status(400).json({
-				success: false,
-				message: "Title is required",
-			});
+			return res.status(400).json({ success: false, message: "Title is required" });
 		}
 
 		if (url && !isValidUrl(url)) {
@@ -84,8 +107,10 @@ export const createLink = async (
 			});
 		}
 
-		// Get user's profile
-		const profile = await Profile.findOne({ userId });
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			select: { id: true },
+		});
 		if (!profile) {
 			return res.status(404).json({
 				success: false,
@@ -93,39 +118,42 @@ export const createLink = async (
 			});
 		}
 
-		const maxOrderLink = await Link.findOne({ profileId: profile._id })
-			.sort({ order: -1 })
-			.limit(1);
-
+		const maxOrderLink = await prisma.link.findFirst({
+			where: { profileId: profile.id },
+			orderBy: { order: "desc" },
+			select: { order: true },
+		});
 		const nextOrder = maxOrderLink ? maxOrderLink.order + 1 : 0;
 
-		const link = new Link({
-			profileId: profile._id,
-			title: title.trim(),
-			url: url?.trim(),
-			description: description?.trim(),
-			techStack: techStack?.map((tech) => tech.trim()).filter(Boolean) || [],
-			role: role || "Full Stack",
-			githubUrl: githubUrl?.trim(),
-			status: "unknown",
-			order: nextOrder,
-			clicks: 0,
+		const link = await prisma.link.create({
+			data: {
+				profileId: profile.id,
+				title: title.trim(),
+				url: url?.trim() || null,
+				description: description?.trim() || null,
+				techStack: techStack?.map((tech) => tech.trim()).filter(Boolean) ?? [],
+				role: roleToEnum(role),
+				githubUrl: githubUrl?.trim() || null,
+				status: LinkStatus.unknown,
+				order: nextOrder,
+				clicks: 0,
+			},
 		});
-
-		await link.save();
 
 		if (url && url.trim()) {
 			const urlToProcess = url.trim();
-			const linkId = link._id.toString();
+			const linkId = link.id;
 
 			captureScreenshot(urlToProcess)
 				.then((screenshotUrl) => {
-					Link.findByIdAndUpdate(link._id, { screenshotUrl }).catch((err) => {
-						logger.error(
-							{ err, linkId, url: urlToProcess, task: "screenshot_update" },
-							"Failed to update screenshot URL",
-						);
-					});
+					prisma.link
+						.update({ where: { id: linkId }, data: { screenshotUrl } })
+						.catch((err) => {
+							logger.error(
+								{ err, linkId, url: urlToProcess, task: "screenshot_update" },
+								"Failed to update screenshot URL",
+							);
+						});
 				})
 				.catch((err) => {
 					logger.error(
@@ -137,18 +165,23 @@ export const createLink = async (
 			runLighthouseAudit(urlToProcess)
 				.then((scores) => {
 					if (scores) {
-						Link.findByIdAndUpdate(link._id, {
-							lighthousePerformance: scores.performance,
-							lighthouseAccessibility: scores.accessibility,
-							lighthouseBestPractices: scores.bestPractices,
-							lighthouseSEO: scores.seo,
-							lighthouseLastRun: new Date(),
-						}).catch((err) => {
-							logger.error(
-								{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
-								"Failed to update Lighthouse scores",
-							);
-						});
+						prisma.link
+							.update({
+								where: { id: linkId },
+								data: {
+									lighthousePerformance: scores.performance,
+									lighthouseAccessibility: scores.accessibility,
+									lighthouseBestPractices: scores.bestPractices,
+									lighthouseSEO: scores.seo,
+									lighthouseLastRun: new Date(),
+								},
+							})
+							.catch((err) => {
+								logger.error(
+									{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
+									"Failed to update Lighthouse scores",
+								);
+							});
 					}
 				})
 				.catch((err) => {
@@ -161,21 +194,26 @@ export const createLink = async (
 
 		if (githubUrl && githubUrl.trim()) {
 			const ghUrl = githubUrl.trim();
-			const linkId = link._id.toString();
+			const linkId = link.id;
 
 			fetchGitHubMetrics(ghUrl)
 				.then((metrics) => {
 					if (metrics) {
-						Link.findByIdAndUpdate(link._id, {
-							githubStars: metrics.stars,
-							lastCommitDate: metrics.lastCommitDate,
-							lastCommitMessage: metrics.lastCommitMessage,
-						}).catch((err) => {
-							logger.error(
-								{ err, linkId, githubUrl: ghUrl, task: "github_update" },
-								"Failed to update GitHub metrics",
-							);
-						});
+						prisma.link
+							.update({
+								where: { id: linkId },
+								data: {
+									githubStars: metrics.stars,
+									lastCommitDate: metrics.lastCommitDate,
+									lastCommitMessage: metrics.lastCommitMessage,
+								},
+							})
+							.catch((err) => {
+								logger.error(
+									{ err, linkId, githubUrl: ghUrl, task: "github_update" },
+									"Failed to update GitHub metrics",
+								);
+							});
 					}
 				})
 				.catch((err) => {
@@ -189,14 +227,11 @@ export const createLink = async (
 		res.status(201).json({
 			success: true,
 			message: "Link created successfully",
-			data: { link },
+			data: { link: formatLink(link) },
 		});
 	} catch (error) {
 		logger.error({ err: error, handler: "createLink" }, "Create link error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -204,37 +239,30 @@ export const getLinks = async (req: Request, res: Response) => {
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
-		// Get user's profile
-		const profile = await Profile.findOne({ userId });
-		
-		// If no profile exists, return empty array (expected state for new users)
-		// This prevents 404 errors when user hasn't created a profile yet
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			select: { id: true },
+		});
+
 		if (!profile) {
-			return res.status(200).json({
-				success: true,
-				data: { links: [] },
-			});
+			return res.status(200).json({ success: true, data: { links: [] } });
 		}
 
-		// Get all links for this profile, sorted by order
-		const links = await Link.find({ profileId: profile._id }).sort({ order: 1 });
+		const links = await prisma.link.findMany({
+			where: { profileId: profile.id },
+			orderBy: { order: "asc" },
+		});
 
 		res.status(200).json({
 			success: true,
-			data: { links },
+			data: { links: links.map(formatLink) },
 		});
 	} catch (error) {
 		logger.error({ err: error, handler: "getLinks" }, "Get links error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -245,43 +273,40 @@ export const updateLink = async (
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
 		const { id } = req.params;
-		const { title, url, description, techStack, role, githubUrl } = req.body;
+		const {
+			title, url, description, techStack, role, githubUrl,
+			problemStatement, outcomeSummary, outcomeMetric,
+			clientName, clientCompany, teamSize, myContribution,
+			walkthroughUrl, caseStudyBody,
+		} = req.body;
 
-		// Get user's profile
-		const profile = await Profile.findOne({ userId });
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			select: { id: true },
+		});
 		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
-			});
+			return res.status(404).json({ success: false, message: "Profile not found" });
 		}
 
-		// Find link and verify it belongs to user's profile
-		const link = await Link.findOne({
-			_id: id,
-			profileId: profile._id,
+		const existing = await prisma.link.findFirst({
+			where: { id, profileId: profile.id },
 		});
 
-		if (!link) {
-			return res.status(404).json({
-				success: false,
-				message: "Link not found",
-			});
+		if (!existing) {
+			return res.status(404).json({ success: false, message: "Link not found" });
 		}
 
-		// Update fields
-		if (title !== undefined) {
-			link.title = title.trim();
-		}
-		const urlChanged = url !== undefined && url.trim() !== link.url;
-		
+		const data: Prisma.LinkUpdateInput = {};
+
+		if (title !== undefined) data.title = title.trim();
+
+		const trimmedUrl = url?.trim();
+		const urlChanged = url !== undefined && trimmedUrl !== (existing.url ?? undefined);
+
 		if (url !== undefined) {
 			if (url && !isValidUrl(url)) {
 				return res.status(400).json({
@@ -289,11 +314,11 @@ export const updateLink = async (
 					message: "Invalid URL format. Must start with http:// or https://",
 				});
 			}
-			link.url = url?.trim();
+			data.url = trimmedUrl || null;
 		}
-		if (description !== undefined) {
-			link.description = description.trim() || undefined;
-		}
+
+		if (description !== undefined) data.description = description.trim() || null;
+
 		if (techStack !== undefined) {
 			if (!Array.isArray(techStack)) {
 				return res.status(400).json({
@@ -301,8 +326,9 @@ export const updateLink = async (
 					message: "techStack must be an array",
 				});
 			}
-			link.techStack = techStack.map((tech) => tech.trim()).filter(Boolean);
+			data.techStack = techStack.map((tech) => tech.trim()).filter(Boolean);
 		}
+
 		if (role !== undefined) {
 			if (!["Frontend", "Backend", "Full Stack"].includes(role)) {
 				return res.status(400).json({
@@ -310,8 +336,13 @@ export const updateLink = async (
 					message: "role must be one of: Frontend, Backend, Full Stack",
 				});
 			}
-			link.role = role;
+			data.role = roleToEnum(role);
 		}
+
+		const trimmedGithubUrl = githubUrl?.trim();
+		const githubUrlChanged =
+			githubUrl !== undefined && trimmedGithubUrl !== (existing.githubUrl ?? undefined);
+
 		if (githubUrl !== undefined) {
 			if (githubUrl && !isValidUrl(githubUrl)) {
 				return res.status(400).json({
@@ -319,27 +350,40 @@ export const updateLink = async (
 					message: "Invalid GitHub URL format. Must start with http:// or https://",
 				});
 			}
-			link.githubUrl = githubUrl?.trim() || undefined;
+			data.githubUrl = trimmedGithubUrl || null;
 		}
 
 		if (urlChanged) {
-			link.screenshotUrl = undefined;
+			data.screenshotUrl = null;
 		}
 
-		await link.save();
+		// Case study fields
+		if (problemStatement !== undefined) data.problemStatement = problemStatement ?? null;
+		if (outcomeSummary !== undefined) data.outcomeSummary = outcomeSummary ?? null;
+		if (outcomeMetric !== undefined) data.outcomeMetric = outcomeMetric ?? null;
+		if (clientName !== undefined) data.clientName = clientName ?? null;
+		if (clientCompany !== undefined) data.clientCompany = clientCompany ?? null;
+		if (teamSize !== undefined) data.teamSize = teamSize ?? null;
+		if (myContribution !== undefined) data.myContribution = myContribution ?? null;
+		if (walkthroughUrl !== undefined) data.walkthroughUrl = walkthroughUrl ?? null;
+		if (caseStudyBody !== undefined) data.caseStudyBody = caseStudyBody ?? null;
 
-		if (urlChanged && url && url.trim()) {
-			const urlToProcess = url.trim();
-			const linkId = link._id.toString();
+		const link = await prisma.link.update({ where: { id }, data });
+
+		if (urlChanged && trimmedUrl) {
+			const urlToProcess = trimmedUrl;
+			const linkId = link.id;
 
 			captureScreenshot(urlToProcess)
 				.then((screenshotUrl) => {
-					Link.findByIdAndUpdate(link._id, { screenshotUrl }).catch((err) => {
-						logger.error(
-							{ err, linkId, url: urlToProcess, task: "screenshot_update" },
-							"Failed to update screenshot URL",
-						);
-					});
+					prisma.link
+						.update({ where: { id: linkId }, data: { screenshotUrl } })
+						.catch((err) => {
+							logger.error(
+								{ err, linkId, url: urlToProcess, task: "screenshot_update" },
+								"Failed to update screenshot URL",
+							);
+						});
 				})
 				.catch((err) => {
 					logger.error(
@@ -351,18 +395,23 @@ export const updateLink = async (
 			runLighthouseAudit(urlToProcess)
 				.then((scores) => {
 					if (scores) {
-						Link.findByIdAndUpdate(link._id, {
-							lighthousePerformance: scores.performance,
-							lighthouseAccessibility: scores.accessibility,
-							lighthouseBestPractices: scores.bestPractices,
-							lighthouseSEO: scores.seo,
-							lighthouseLastRun: new Date(),
-						}).catch((err) => {
-							logger.error(
-								{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
-								"Failed to update Lighthouse scores",
-							);
-						});
+						prisma.link
+							.update({
+								where: { id: linkId },
+								data: {
+									lighthousePerformance: scores.performance,
+									lighthouseAccessibility: scores.accessibility,
+									lighthouseBestPractices: scores.bestPractices,
+									lighthouseSEO: scores.seo,
+									lighthouseLastRun: new Date(),
+								},
+							})
+							.catch((err) => {
+								logger.error(
+									{ err, linkId, url: urlToProcess, task: "lighthouse_update" },
+									"Failed to update Lighthouse scores",
+								);
+							});
 					}
 				})
 				.catch((err) => {
@@ -373,25 +422,28 @@ export const updateLink = async (
 				});
 		}
 
-		const githubUrlChanged = githubUrl !== undefined && githubUrl?.trim() !== link.githubUrl;
-
-		if (githubUrlChanged && githubUrl && githubUrl.trim()) {
-			const ghUrl = githubUrl.trim();
-			const linkId = link._id.toString();
+		if (githubUrlChanged && trimmedGithubUrl) {
+			const ghUrl = trimmedGithubUrl;
+			const linkId = link.id;
 
 			fetchGitHubMetrics(ghUrl)
 				.then((metrics) => {
 					if (metrics) {
-						Link.findByIdAndUpdate(link._id, {
-							githubStars: metrics.stars,
-							lastCommitDate: metrics.lastCommitDate,
-							lastCommitMessage: metrics.lastCommitMessage,
-						}).catch((err) => {
-							logger.error(
-								{ err, linkId, githubUrl: ghUrl, task: "github_update" },
-								"Failed to update GitHub metrics",
-							);
-						});
+						prisma.link
+							.update({
+								where: { id: linkId },
+								data: {
+									githubStars: metrics.stars,
+									lastCommitDate: metrics.lastCommitDate,
+									lastCommitMessage: metrics.lastCommitMessage,
+								},
+							})
+							.catch((err) => {
+								logger.error(
+									{ err, linkId, githubUrl: ghUrl, task: "github_update" },
+									"Failed to update GitHub metrics",
+								);
+							});
 					}
 				})
 				.catch((err) => {
@@ -405,14 +457,11 @@ export const updateLink = async (
 		res.status(200).json({
 			success: true,
 			message: "Link updated successfully",
-			data: { link },
+			data: { link: formatLink(link) },
 		});
 	} catch (error) {
 		logger.error({ err: error, handler: "updateLink" }, "Update link error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -420,58 +469,44 @@ export const deleteLink = async (req: Request<{ id: string }>, res: Response) =>
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
 		const { id } = req.params;
 
-		// Get user's profile
-		const profile = await Profile.findOne({ userId });
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			select: { id: true },
+		});
 		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
-			});
+			return res.status(404).json({ success: false, message: "Profile not found" });
 		}
 
-		// Find link and verify it belongs to user's profile
-		const link = await Link.findOne({
-			_id: id,
-			profileId: profile._id,
+		const link = await prisma.link.findFirst({
+			where: { id, profileId: profile.id },
+			select: { id: true },
 		});
 
 		if (!link) {
-			return res.status(404).json({
-				success: false,
-				message: "Link not found",
+			return res.status(404).json({ success: false, message: "Link not found" });
+		}
+
+		await prisma.$transaction(async (tx) => {
+			await tx.link.delete({ where: { id } });
+			const remaining = await tx.link.findMany({
+				where: { profileId: profile.id },
+				orderBy: { order: "asc" },
+				select: { id: true },
 			});
-		}
-
-		// Delete link
-		await Link.deleteOne({ _id: id });
-
-		// Reorder remaining links to fill gaps
-		const remainingLinks = await Link.find({ profileId: profile._id }).sort({
-			order: 1,
+			for (let i = 0; i < remaining.length; i++) {
+				await tx.link.update({ where: { id: remaining[i].id }, data: { order: i } });
+			}
 		});
-		for (let i = 0; i < remainingLinks.length; i++) {
-			remainingLinks[i].order = i;
-			await remainingLinks[i].save();
-		}
 
-		res.status(200).json({
-			success: true,
-			message: "Link deleted successfully",
-		});
+		res.status(200).json({ success: true, message: "Link deleted successfully" });
 	} catch (error) {
 		logger.error({ err: error, handler: "deleteLink" }, "Delete link error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -482,32 +517,25 @@ export const validateLink = async (
 	try {
 		const userId = req.userId;
 		if (!userId) {
-			return res.status(401).json({
-				success: false,
-				message: "Unauthorized",
-			});
+			return res.status(401).json({ success: false, message: "Unauthorized" });
 		}
 
 		const { id } = req.params;
 
-		const profile = await Profile.findOne({ userId });
+		const profile = await prisma.profile.findUnique({
+			where: { userId },
+			select: { id: true },
+		});
 		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
-			});
+			return res.status(404).json({ success: false, message: "Profile not found" });
 		}
 
-		const link = await Link.findOne({
-			_id: id,
-			profileId: profile._id,
+		const link = await prisma.link.findFirst({
+			where: { id, profileId: profile.id },
 		});
 
 		if (!link) {
-			return res.status(404).json({
-				success: false,
-				message: "Link not found",
-			});
+			return res.status(404).json({ success: false, message: "Link not found" });
 		}
 
 		if (!link.url || !link.url.trim()) {
@@ -518,17 +546,22 @@ export const validateLink = async (
 		}
 
 		const validationResult = await validateUrl(link.url);
+		const lastCheckedAt = new Date();
 
-		link.status = validationResult.status;
-		link.lastCheckedAt = new Date();
-		await link.save();
+		const updated = await prisma.link.update({
+			where: { id },
+			data: {
+				status: validationResult.status as LinkStatus,
+				lastCheckedAt,
+			},
+		});
 
 		res.json({
 			success: true,
 			message: "Link validated successfully",
 			data: {
-				status: link.status,
-				lastCheckedAt: link.lastCheckedAt,
+				status: updated.status,
+				lastCheckedAt: updated.lastCheckedAt,
 				responseTime: validationResult.responseTime,
 				statusCode: validationResult.statusCode,
 			},
@@ -536,10 +569,7 @@ export const validateLink = async (
 	} catch (error: unknown) {
 		const msg = error instanceof Error ? error.message : "Failed to validate link";
 		logger.error({ err: error, handler: "validateLink" }, "Validate link error");
-		res.status(500).json({
-			success: false,
-			message: msg,
-		});
+		res.status(500).json({ success: false, message: msg });
 	}
 };
 
@@ -548,39 +578,51 @@ export const getPublicLinks = async (req: Request, res: Response) => {
 		const { username } = req.params;
 
 		if (!username) {
-			return res.status(400).json({
-				success: false,
-				message: "Username is required",
-			});
+			return res.status(400).json({ success: false, message: "Username is required" });
 		}
 
-		// Get profile by username
-		const profile = await Profile.findOne({
-			username: username.toLowerCase(),
+		const profile = await prisma.profile.findUnique({
+			where: { username: username.toLowerCase() },
+			select: { id: true },
 		});
 
 		if (!profile) {
-			return res.status(404).json({
-				success: false,
-				message: "Profile not found",
-			});
+			return res.status(404).json({ success: false, message: "Profile not found" });
 		}
 
-		// Get all links for this profile, sorted by order
-		const links = await Link.find({ profileId: profile._id })
-			.sort({ order: 1 })
-			.select("-clicks"); // Don't expose click count in public API
+		const links = await prisma.link.findMany({
+			where: { profileId: profile.id },
+			orderBy: { order: "asc" },
+		});
 
 		res.status(200).json({
 			success: true,
-			data: { links },
+			data: { links: links.map(formatLink) },
 		});
 	} catch (error) {
 		logger.error({ err: error, handler: "getPublicLinks" }, "Get public links error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
+		res.status(500).json({ success: false, message: "Internal server error" });
+	}
+};
+
+// GET /api/links/public/:username/:id — single project detail for case study page
+export const getPublicLink = async (req: Request, res: Response) => {
+	try {
+		const { username, id } = req.params;
+
+		const profile = await prisma.profile.findUnique({
+			where: { username: username.toLowerCase() },
+			select: { id: true },
 		});
+		if (!profile) return res.status(404).json({ success: false, message: "Profile not found" });
+
+		const link = await prisma.link.findFirst({ where: { id, profileId: profile.id } });
+		if (!link) return res.status(404).json({ success: false, message: "Project not found" });
+
+		res.json({ success: true, data: { link: formatLink(link) } });
+	} catch (error) {
+		logger.error({ err: error, handler: "getPublicLink" }, "Get public link error");
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
 
@@ -588,34 +630,21 @@ export const trackLinkClick = async (req: Request<{ id: string }>, res: Response
 	try {
 		const { id } = req.params;
 
-		// Find link
-		const link = await Link.findById(id);
-		if (!link) {
-			return res.status(404).json({
-				success: false,
-				message: "Link not found",
+		try {
+			const link = await prisma.link.update({
+				where: { id },
+				data: { clicks: { increment: 1 } },
+				select: { url: true },
 			});
+			res.status(200).json({ success: true, data: { url: link.url } });
+		} catch (e) {
+			if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+				return res.status(404).json({ success: false, message: "Link not found" });
+			}
+			throw e;
 		}
-
-		// Increment click count
-		link.clicks += 1;
-		await link.save();
-
-		// Return the URL to redirect to
-		res.status(200).json({
-			success: true,
-			data: {
-				url: link.url,
-			},
-		});
 	} catch (error) {
 		logger.error({ err: error, handler: "trackLinkClick" }, "Track link click error");
-		res.status(500).json({
-			success: false,
-			message: "Internal server error",
-		});
+		res.status(500).json({ success: false, message: "Internal server error" });
 	}
 };
-
-
-

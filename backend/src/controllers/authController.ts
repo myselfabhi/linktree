@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../config/db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
 
@@ -24,7 +25,6 @@ export const signup = async (req: Request<{}, {}, SignupBody>, res: Response) =>
 	try {
 		const { email, password, name } = req.body;
 
-		// Validation
 		if (!email || !password || !name) {
 			return res.status(400).json({
 				success: false,
@@ -32,7 +32,6 @@ export const signup = async (req: Request<{}, {}, SignupBody>, res: Response) =>
 			});
 		}
 
-		// Email format validation
 		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 		if (!emailRegex.test(email)) {
 			return res.status(400).json({
@@ -41,7 +40,6 @@ export const signup = async (req: Request<{}, {}, SignupBody>, res: Response) =>
 			});
 		}
 
-		// Password strength validation
 		if (password.length < 8) {
 			return res.status(400).json({
 				success: false,
@@ -49,8 +47,11 @@ export const signup = async (req: Request<{}, {}, SignupBody>, res: Response) =>
 			});
 		}
 
-		// Check if user already exists
-		const existingUser = await User.findOne({ email: email.toLowerCase() });
+		const normalizedEmail = email.toLowerCase();
+
+		const existingUser = await prisma.user.findUnique({
+			where: { email: normalizedEmail },
+		});
 		if (existingUser) {
 			return res.status(409).json({
 				success: false,
@@ -58,43 +59,37 @@ export const signup = async (req: Request<{}, {}, SignupBody>, res: Response) =>
 			});
 		}
 
-		// Hash password
-		const saltRounds = 10;
-		const hashedPassword = await bcrypt.hash(password, saltRounds);
+		const hashedPassword = await bcrypt.hash(password, 10);
 
-		// Create user
-		const user = new User({
-			email: email.toLowerCase(),
-			password: hashedPassword,
-			name: name.trim(),
+		const user = await prisma.user.create({
+			data: {
+				email: normalizedEmail,
+				password: hashedPassword,
+				name: name.trim(),
+			},
 		});
 
-		await user.save();
-
-		// Generate JWT token
 		const token = jwt.sign(
-			{
-				userId: user._id.toString(),
-				email: user.email,
-			},
+			{ userId: user.id, email: user.email },
 			JWT_SECRET,
 			{ expiresIn: "7d" }
 		);
 
-		// Return user data (without password)
 		res.status(201).json({
 			success: true,
 			message: "User created successfully",
 			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					name: user.name,
-				},
+				user: { id: user.id, email: user.email, name: user.name },
 				token,
 			},
 		});
 	} catch (error) {
+		if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+			return res.status(409).json({
+				success: false,
+				message: "User with this email already exists",
+			});
+		}
 		console.error("Signup error:", error);
 		res.status(500).json({
 			success: false,
@@ -107,7 +102,6 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response) => {
 	try {
 		const { email, password } = req.body;
 
-		// Validation
 		if (!email || !password) {
 			return res.status(400).json({
 				success: false,
@@ -115,8 +109,9 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response) => {
 			});
 		}
 
-		// Find user
-		const user = await User.findOne({ email: email.toLowerCase() });
+		const user = await prisma.user.findUnique({
+			where: { email: email.toLowerCase() },
+		});
 		if (!user) {
 			return res.status(401).json({
 				success: false,
@@ -124,7 +119,6 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response) => {
 			});
 		}
 
-		// Verify password
 		const isPasswordValid = await bcrypt.compare(password, user.password);
 		if (!isPasswordValid) {
 			return res.status(401).json({
@@ -133,26 +127,17 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response) => {
 			});
 		}
 
-		// Generate JWT token
 		const token = jwt.sign(
-			{
-				userId: user._id.toString(),
-				email: user.email,
-			},
+			{ userId: user.id, email: user.email },
 			JWT_SECRET,
 			{ expiresIn: "7d" }
 		);
 
-		// Return user data (without password)
 		res.status(200).json({
 			success: true,
 			message: "Login successful",
 			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					name: user.name,
-				},
+				user: { id: user.id, email: user.email, name: user.name },
 				token,
 			},
 		});
@@ -167,10 +152,12 @@ export const login = async (req: Request<{}, {}, LoginBody>, res: Response) => {
 
 export const getCurrentUser = async (req: Request, res: Response) => {
 	try {
-		// req.userId is set by auth middleware
 		const userId = (req as any).userId;
 
-		const user = await User.findById(userId).select("-password");
+		const user = await prisma.user.findUnique({
+			where: { id: userId },
+			select: { id: true, email: true, name: true },
+		});
 		if (!user) {
 			return res.status(404).json({
 				success: false,
@@ -180,13 +167,7 @@ export const getCurrentUser = async (req: Request, res: Response) => {
 
 		res.status(200).json({
 			success: true,
-			data: {
-				user: {
-					id: user._id,
-					email: user.email,
-					name: user.name,
-				},
-			},
+			data: { user },
 		});
 	} catch (error) {
 		console.error("Get current user error:", error);
@@ -196,19 +177,3 @@ export const getCurrentUser = async (req: Request, res: Response) => {
 		});
 	}
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

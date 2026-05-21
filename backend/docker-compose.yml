@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: linktree-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: linktree
+      POSTGRES_PASSWORD: linktree
+      POSTGRES_DB: linktree
+    ports:
+      - "5434:5432"
+    volumes:
+      - linktree_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linktree -d linktree"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  linktree_pg_data:
