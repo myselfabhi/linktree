@@ -31,7 +31,7 @@ export default function AuthModal({ mode, onClose, onSwitch }: Props) {
 
 		try {
 			if (mode === "signup") {
-				const res = await apiRequest("/api/auth/register", {
+				const res = await apiRequest("/api/auth/signup", {
 					method: "POST",
 					body: JSON.stringify({ name, email, password }),
 				});
