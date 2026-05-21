@@ -79,7 +79,7 @@ app.use("/api/bio-template", bioTemplateRoutes);
 // Connect to PostgreSQL and start server
 connectDB()
 	.then(() => {
-		app.listen(PORT, () => {
+		app.listen(Number(PORT), "0.0.0.0", () => {
 			logger.info({ port: PORT }, "Backend server running");
 		});
 	})
