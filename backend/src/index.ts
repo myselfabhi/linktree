@@ -18,6 +18,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Log startup context so we can debug Railway networking
+console.log(`[STARTUP] PORT=${PORT} NODE_ENV=${process.env.NODE_ENV} RAILWAY_SERVICE_NAME=${process.env.RAILWAY_SERVICE_NAME}`);
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -80,6 +83,7 @@ app.use("/api/bio-template", bioTemplateRoutes);
 connectDB()
 	.then(() => {
 		app.listen(Number(PORT), "0.0.0.0", () => {
+			console.log(`[STARTUP] Server listening on 0.0.0.0:${PORT}`);
 			logger.info({ port: PORT }, "Backend server running");
 		});
 	})
